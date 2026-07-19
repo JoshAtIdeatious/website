@@ -1,1 +1,68 @@
-
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Ideatious</title>
+  <meta name="description" content="Ideatious.">
+  <link rel="icon" type="image/svg+xml" href="favicon.svg">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="logo">
+    <svg class="wordmark" viewBox="0 -100 900 360" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="ideatious">
+      <defs>
+        <radialGradient id="bulbGlow" cx="42%" cy="36%" r="68%">
+          <stop offset="0%" stop-color="#fffcef"/>
+          <stop offset="45%" stop-color="#ffe27a"/>
+          <stop offset="100%" stop-color="#f3c249"/>
+        </radialGradient>
+        <radialGradient id="bulbGlowOff" cx="42%" cy="36%" r="68%">
+          <stop offset="0%" stop-color="#f3f6f4"/>
+          <stop offset="45%" stop-color="#dfe5e2"/>
+          <stop offset="100%" stop-color="#c7cfca"/>
+        </radialGradient>
+        <linearGradient id="metalGradient" x1="0" y1="0" x2="1" y2="0">
+          <stop offset="0%" stop-color="#c9982f"/>
+          <stop offset="35%" stop-color="#f2c94c"/>
+          <stop offset="65%" stop-color="#f2c94c"/>
+          <stop offset="100%" stop-color="#c9982f"/>
+        </linearGradient>
+        <filter id="lightEdgeBlur" x="-30%" y="-80%" width="160%" height="260%">
+          <feGaussianBlur stdDeviation="7"/>
+        </filter>
+        <mask id="letterLightMask" maskUnits="userSpaceOnUse" x="0" y="-100" width="900" height="360">
+          <g filter="url(#lightEdgeBlur)">
+            <rect x="4" y="121" width="66" height="19" fill="#fff" fill-opacity="1"/>
+            <rect x="62" y="55" width="114" height="85" fill="#fff" fill-opacity="0.85"/>
+            <rect x="168" y="121" width="93" height="19" fill="#fff" fill-opacity="0.62"/>
+            <rect x="254" y="121" width="95" height="19" fill="#fff" fill-opacity="0.42"/>
+            <rect x="342" y="109" width="79" height="31" fill="#fff" fill-opacity="0.24"/>
+          </g>
+        </mask>
+      </defs>
+      <text class="wordmark__text" x="8" y="200" font-family="Cormorant Garamond, Georgia, serif" font-weight="500" font-size="200" letter-spacing="4"><tspan class="i-char">&#305;</tspan>deatious</text>
+      <text class="wordmark__text-light" x="8" y="200" font-family="Cormorant Garamond, Georgia, serif" font-weight="500" font-size="200" letter-spacing="4" aria-hidden="true" mask="url(#letterLightMask)">&#305;deatious</text>
+      <g class="bulb" id="bulb" transform="translate(-12.2, -8.26) scale(4.1)">
+        <g class="bulb__base">
+          <path d="M9 18.3 L15 18.3 L14.3 19.5 L9.7 19.5 Z" fill="#e7ece9"/>
+          <path d="M9.7 19.5 H14.3 V26.3 Q14.3 28 12.6 28 H11.4 Q9.7 28 9.7 26.3 Z" fill="url(#metalGradient)"/>
+          <line x1="9.75" y1="21.2" x2="14.25" y2="21.2" stroke="#c9982f" stroke-width="0.35" opacity="0.55"/>
+          <line x1="9.75" y1="23" x2="14.25" y2="23" stroke="#c9982f" stroke-width="0.35" opacity="0.55"/>
+          <line x1="9.75" y1="24.8" x2="14.25" y2="24.8" stroke="#c9982f" stroke-width="0.35" opacity="0.55"/>
+          <ellipse cx="12" cy="27.8" rx="1" ry="0.4" fill="#a97f2c"/>
+        </g>
+        <g class="bulb__light">
+          <path class="bulb__glass" d="M12 2 C16.5 2 19.6 5.6 19.6 10.2 C19.6 13.6 17.7 16.3 15 17.9 L15 18.3 L9 18.3 L9 17.9 C6.3 16.3 4.4 13.6 4.4 10.2 C4.4 5.6 7.5 2 12 2 Z"/>
+          <path class="bulb__filament" d="M9.9 18.3 L9.9 14.3 C9.9 10.3 14.1 10.3 14.1 14.3 L14.1 18.3 M12 10.6 L12 12.2" fill="none" stroke-width="0.5" stroke-linecap="round" stroke-linejoin="round"/>
+        </g>
+        <ellipse class="bulb__shine" cx="9.3" cy="7.5" rx="2" ry="3.2" fill="#ffffff" opacity="0.32" transform="rotate(-18 9.3 7.5)"/>
+      </g>
+    </svg>
+  </div>
+  <script src="script.js" defer></script>
+</body>
+</html>
