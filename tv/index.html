@@ -1,0 +1,622 @@
+<!DOCTYPE html>
+<!--
+  ═══════════════════════════════════════════════════════════════════
+  IDEATIOUS WALL — website edition, served at ideatious.com/tv
+  CLAUDE PROTOCOL (how any Claude session drives this page)
+  ═══════════════════════════════════════════════════════════════════
+  The TV polls tv/data/*.json ON BRANCH MAIN of JoshAtIdeatious/website
+  via the GitHub contents API (ETag-conditional, ~20 s). To change what
+  the TV shows, commit the JSON to main — no page rebuild needed.
+
+  tv/data/state.json   { "view": "home"|"weather"|"snow"|"note",
+                         "note": "...", "updatedAt": "<ISO>" }
+  tv/data/snow.json    { "fetchedAt": "<ISO>", "resorts": [
+                           { "id","name","cam": "<https image url>",
+                             "camLabel": "...", "report": {
+                               "status","base","lifts","note" } } ] }
+  tv/data/weather.json OPTIONAL override (e.g. MetService numbers):
+                       same schema as the artifact edition — {location,
+                       source, fetchedAt, current{temp,icon,condition,
+                       wind,humidity}, days[{day,date,icon,high,low,
+                       rain,text}]}. Used when fetchedAt < 24 h old;
+                       otherwise the page auto-fetches Open-Meteo.
+  Never invent numbers; omit unknown keys (page shows an em-dash).
+  Cam stills hot-link live and refresh themselves every 10 min.
+  Full manual: tv/README.md. PIN gate: sha256("ideatious-wall|"+PIN).
+  ═══════════════════════════════════════════════════════════════════
+-->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="robots" content="noindex, nofollow">
+<title>Ideatious Wall</title>
+<link rel="icon" type="image/svg+xml" href="../favicon.svg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=DM+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --ground:#0d0f12; --surface:#14171c; --panel:#1a1e24;
+    --line:#23272e; --line-soft:#1d2127;
+    --ink:#e8e4dc; --ink-mid:#c8cdd5; --muted:#8b909a; --dim:#6b7079;
+    --lamp:#e6c98a;
+    --good:#9fe0b0; --good-bg:rgba(74,222,128,.12); --good-line:rgba(74,222,128,.25);
+    --warn:#e6c98a; --warn-bg:rgba(230,201,138,.12); --warn-line:rgba(230,201,138,.28);
+    --off:#9aa0aa;  --off-bg:rgba(154,160,170,.1);   --off-line:rgba(154,160,170,.22);
+    --serif:'DM Serif Display',Georgia,serif;
+    --sans:'DM Sans',system-ui,sans-serif;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  html,body{height:100%}
+  body{background:var(--ground);color:var(--ink);font-family:var(--sans);
+    overflow:hidden;font-size:clamp(14px,1.4vmin,22px)}
+  body.hide-cursor{cursor:none}
+
+  /* ── PIN gate ────────────────────────────────────────────── */
+  #gate{position:fixed;inset:0;background:var(--ground);z-index:10;
+    display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2.4vmin}
+  #gate.off{display:none}
+  #gate .brand{font-family:var(--serif);font-size:4vmin}
+  #gate .brand .dot{color:var(--lamp)}
+  #gate input{background:var(--panel);border:1px solid var(--line);border-radius:1.2vmin;
+    color:var(--ink);font-family:var(--sans);font-size:3vmin;text-align:center;
+    letter-spacing:1vmin;padding:1.4vmin 2vmin;width:24vmin;outline:none}
+  #gate input:focus{border-color:var(--lamp)}
+  #gate button{background:var(--panel);border:1px solid var(--line);border-radius:1.2vmin;
+    color:var(--ink-mid);font-family:var(--sans);font-size:2vmin;padding:1.2vmin 3vmin;cursor:pointer}
+  #gate button:focus{border-color:var(--lamp);outline:none}
+  #gate .wrong{color:var(--warn);font-size:1.8vmin;min-height:2.4vmin}
+
+  .wall{height:100vh;display:flex;flex-direction:column;padding:3.2vmin 3.6vmin 2.2vmin}
+  .top{display:flex;align-items:baseline;gap:1.6vmin;padding-bottom:2vmin;
+    border-bottom:1px solid var(--line-soft)}
+  .brand{font-family:var(--serif);font-size:2.6vmin;letter-spacing:.06em;color:var(--ink)}
+  .brand .dot{color:var(--lamp)}
+  .viewname{font-size:1.5vmin;letter-spacing:.14em;text-transform:uppercase;color:var(--dim)}
+  .topclock{margin-left:auto;font-family:var(--serif);font-size:3vmin;
+    font-variant-numeric:tabular-nums;color:var(--ink-mid)}
+  .topdate{font-size:1.6vmin;color:var(--muted)}
+
+  main{flex:1;position:relative;min-height:0}
+  .view{position:absolute;inset:0;padding-top:2.6vmin;display:none;
+    opacity:0;transition:opacity .45s ease}
+  .view.on{display:flex;flex-direction:column}
+  .view.shown{opacity:1}
+  @media (prefers-reduced-motion: reduce){.view{transition:none}}
+
+  #view-home.on{flex-direction:row;gap:3vmin}
+  .home-left{flex:1.15;display:flex;flex-direction:column;justify-content:center;min-width:0}
+  .home-clock{font-family:var(--serif);font-size:17vmin;line-height:.95;
+    font-variant-numeric:tabular-nums;letter-spacing:.01em}
+  .home-date{margin-top:1.6vmin;font-size:2.6vmin;color:var(--muted)}
+  .home-note{margin-top:4vmin;font-size:2.2vmin;line-height:1.5;color:var(--ink-mid);
+    border-left:2px solid var(--lamp);padding-left:1.8vmin;max-width:36ch;display:none}
+  .home-right{flex:1;display:flex;flex-direction:column;gap:2.2vmin;min-width:0;justify-content:center}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:1.6vmin;
+    padding:2.2vmin 2.6vmin}
+  .pname{font-family:var(--serif);font-size:2.4vmin;display:flex;
+    justify-content:space-between;align-items:center;gap:1vmin}
+  .pname small{font-size:1.3vmin;font-family:var(--sans);color:var(--dim);
+    letter-spacing:.1em;text-transform:uppercase}
+  .home-now{display:flex;align-items:baseline;gap:1.6vmin;margin-top:1.4vmin}
+  .home-now .bignum{font-family:var(--serif);font-size:6.4vmin;line-height:1;
+    font-variant-numeric:tabular-nums}
+  .home-now .cond{font-size:2vmin;color:var(--muted)}
+  .ministrip{display:flex;margin-top:1.8vmin;border-top:1px solid var(--line-soft)}
+  .ministrip .cell{flex:1;text-align:center;padding-top:1.4vmin}
+  .cl{font-size:1.3vmin;color:var(--muted);text-transform:uppercase;letter-spacing:.08em}
+  .ci{font-size:2.4vmin;margin-top:.5vmin}
+  .cv{font-size:1.9vmin;font-weight:600;margin-top:.5vmin;font-variant-numeric:tabular-nums}
+  .cvsub{font-size:1.5vmin;color:var(--dim);font-variant-numeric:tabular-nums}
+  .snowrows{margin-top:1vmin}
+  .stat{display:flex;justify-content:space-between;align-items:center;gap:1.4vmin;
+    padding:1.1vmin 0;border-top:1px solid var(--line-soft);font-size:1.8vmin}
+  .stat:first-child{border-top:0}
+  .stat span{color:var(--muted)}
+  .stat b{font-weight:500;font-variant-numeric:tabular-nums}
+
+  .badge{font-size:1.2vmin;letter-spacing:.08em;text-transform:uppercase;
+    padding:.5vmin 1.2vmin;border-radius:2vmin;white-space:nowrap}
+  .badge.open{color:var(--good);background:var(--good-bg);border:1px solid var(--good-line)}
+  .badge.warn{color:var(--warn);background:var(--warn-bg);border:1px solid var(--warn-line)}
+  .badge.off{color:var(--off);background:var(--off-bg);border:1px solid var(--off-line)}
+
+  .wx-hero{display:flex;align-items:baseline;gap:2.6vmin;padding:1vmin 0 2.4vmin}
+  .wx-hero .bignum{font-family:var(--serif);font-size:12vmin;line-height:1;
+    font-variant-numeric:tabular-nums}
+  .wx-hero .icon{font-size:7vmin}
+  .wx-hero .meta{font-size:2.2vmin;color:var(--muted);line-height:1.6}
+  .wx-hero .meta b{color:var(--ink-mid);font-weight:500}
+  .wx-days{flex:1;display:flex;gap:1.6vmin;align-items:stretch;min-height:0}
+  .wx-day{flex:1;background:var(--panel);border:1px solid var(--line);
+    border-radius:1.6vmin;padding:2.4vmin 1vmin;text-align:center;
+    display:flex;flex-direction:column;justify-content:center;gap:1vmin}
+  .wx-day .cl{font-size:1.6vmin}
+  .wx-day .ci{font-size:4.6vmin;margin:0}
+  .wx-day .hi{font-family:var(--serif);font-size:3.4vmin;font-variant-numeric:tabular-nums}
+  .wx-day .lo{font-size:2vmin;color:var(--dim);font-variant-numeric:tabular-nums}
+  .wx-day .rain{font-size:1.5vmin;color:var(--muted)}
+  .wx-day .txt{font-size:1.4vmin;color:var(--dim);font-style:italic;line-height:1.4}
+
+  .snow-grid{flex:1;display:flex;gap:2.2vmin;min-height:0}
+  .cam{flex:1;background:var(--panel);border:1px solid var(--line);border-radius:1.6vmin;
+    padding:2vmin;display:flex;flex-direction:column;gap:1.4vmin;min-width:0}
+  .cam-frame{flex:1;min-height:0;border-radius:1vmin;overflow:hidden;background:var(--surface);
+    border:1px solid var(--line-soft);display:flex;align-items:center;justify-content:center;
+    position:relative}
+  .cam-frame img{width:100%;height:100%;object-fit:cover;display:none}
+  .cam-empty{position:absolute;inset:0;display:flex;flex-direction:column;gap:1.2vmin;
+    align-items:center;justify-content:center;color:var(--dim);font-size:1.5vmin;text-align:center;
+    padding:0 2vmin}
+  .cam-empty svg{width:9vmin;height:6vmin;opacity:.55}
+  .cam-stats .stat{font-size:1.6vmin;padding:.9vmin 0}
+  .cam-when{font-size:1.3vmin;color:var(--dim)}
+
+  #view-note.on{align-items:center;justify-content:center;text-align:center}
+  .note-big{font-family:var(--serif);font-size:6.5vmin;line-height:1.25;
+    max-width:26ch;text-wrap:balance}
+  .note-hint{margin-top:3vmin;font-size:1.8vmin;color:var(--dim)}
+
+  .foot{display:flex;align-items:center;gap:2.4vmin;padding-top:1.8vmin;
+    border-top:1px solid var(--line-soft);font-size:1.4vmin;color:var(--dim)}
+  .foot .hint{font-style:italic}
+  .foot .right{margin-left:auto;display:flex;align-items:center;gap:1vmin;
+    font-variant-numeric:tabular-nums}
+  .live-dot{width:.9vmin;height:.9vmin;border-radius:50%;background:var(--off)}
+  .live-dot.on{background:var(--good)}
+</style>
+</head>
+<body>
+
+<div id="gate">
+  <div class="brand">ıdeatious<span class="dot">.</span></div>
+  <input id="pin" type="password" inputmode="numeric" maxlength="8" autocomplete="off" aria-label="PIN">
+  <button id="unlock">Unlock</button>
+  <div class="wrong" id="wrong"></div>
+</div>
+
+<div class="wall">
+  <header class="top">
+    <span class="brand">ıdeatious<span class="dot">.</span></span>
+    <span class="viewname" id="viewname">home</span>
+    <span class="topclock" id="topclock">--:--</span>
+    <span class="topdate" id="topdate"></span>
+  </header>
+
+  <main>
+    <section class="view" id="view-home">
+      <div class="home-left">
+        <div class="home-clock" id="homeclock">--:--</div>
+        <div class="home-date" id="homedate"></div>
+        <div class="home-note" id="homenote"></div>
+      </div>
+      <div class="home-right">
+        <div class="panel">
+          <div class="pname">Queenstown <small id="home-wx-when">weather</small></div>
+          <div class="home-now">
+            <span class="bignum" id="home-temp">—</span>
+            <span class="cond" id="home-cond">loading…</span>
+          </div>
+          <div class="ministrip" id="home-days"></div>
+        </div>
+        <div class="panel">
+          <div class="pname">The hill <small id="home-snow-when">snow</small></div>
+          <div class="snowrows" id="home-snow"></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="view" id="view-weather">
+      <div class="wx-hero">
+        <span class="icon" id="wx-icon"></span>
+        <span class="bignum" id="wx-temp">—</span>
+        <span class="meta" id="wx-meta">loading forecast…</span>
+      </div>
+      <div class="wx-days" id="wx-days"></div>
+    </section>
+
+    <section class="view" id="view-snow">
+      <div class="snow-grid" id="snow-grid"></div>
+    </section>
+
+    <section class="view" id="view-note">
+      <div class="note-big" id="note-text">Nothing on the board.</div>
+      <div class="note-hint">Say: “put a note on the TV”</div>
+    </section>
+  </main>
+
+  <footer class="foot">
+    <span class="hint">Talk to Claude: “show the snow cams” · “show the weather” · “back to home”</span>
+    <span id="freshness"></span>
+    <span class="right"><span class="live-dot" id="livedot"></span><span id="livelabel">connecting</span></span>
+  </footer>
+</div>
+
+<script>
+(function () {
+  "use strict";
+  var $ = function (id) { return document.getElementById(id); };
+  var DASH = "—";
+  var VIEWS = ["home", "weather", "snow", "note"];
+  var REPO_API = "https://api.github.com/repos/JoshAtIdeatious/website/contents/tv/data/";
+
+  /* ── PIN gate: sha256("ideatious-wall|" + pin) ─────────── */
+  var PIN_HASH = "515762c4534efeaaabf16ea2607f60f75fd6fc56281a71bd85dd2b49a7171425";
+  function sha256hex(text) {
+    return crypto.subtle.digest("SHA-256", new TextEncoder().encode(text))
+      .then(function (buf) {
+        return Array.prototype.map.call(new Uint8Array(buf), function (b) {
+          return b.toString(16).padStart(2, "0");
+        }).join("");
+      });
+  }
+  function tryUnlock() {
+    sha256hex("ideatious-wall|" + $("pin").value.trim()).then(function (h) {
+      if (h === PIN_HASH) {
+        try { localStorage.setItem("wall-unlocked", h); } catch (e) {}
+        $("gate").classList.add("off");
+      } else {
+        $("wrong").textContent = "Not it — try again.";
+        $("pin").value = "";
+      }
+    });
+  }
+  $("unlock").addEventListener("click", tryUnlock);
+  $("pin").addEventListener("keydown", function (e) { if (e.key === "Enter") tryUnlock(); });
+  try {
+    if (localStorage.getItem("wall-unlocked") === PIN_HASH) $("gate").classList.add("off");
+    else $("pin").focus();
+  } catch (e) { $("pin").focus(); }
+
+  /* ── clock ─────────────────────────────────────────────── */
+  var DAYS = ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"];
+  var MONTHS = ["January","February","March","April","May","June","July",
+                "August","September","October","November","December"];
+  function tick() {
+    var n = new Date();
+    var hh = String(n.getHours()).padStart(2, "0");
+    var mm = String(n.getMinutes()).padStart(2, "0");
+    var date = DAYS[n.getDay()] + " " + n.getDate() + " " + MONTHS[n.getMonth()];
+    $("topclock").textContent = hh + ":" + mm;
+    $("topdate").textContent = date;
+    $("homeclock").textContent = hh + ":" + mm;
+    $("homedate").textContent = date;
+  }
+  tick();
+  setInterval(tick, 5000);
+
+  /* ── view switching ────────────────────────────────────── */
+  var current = "";
+  function showView(name) {
+    if (VIEWS.indexOf(name) < 0) name = "home";
+    if (name === current) return;
+    current = name;
+    $("viewname").textContent = name;
+    VIEWS.forEach(function (v) {
+      var el = $("view-" + v);
+      var on = v === name;
+      el.classList.toggle("on", on);
+      requestAnimationFrame(function () { el.classList.toggle("shown", on); });
+    });
+  }
+  showView("home");
+
+  /* ── helpers (fetched JSON is untrusted → textContent) ─── */
+  function el(tag, cls, text) {
+    var e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (text !== undefined) e.textContent = text;
+    return e;
+  }
+  var str = function (v, fb) { return (typeof v === "string" && v.trim()) ? v.trim() : (fb !== undefined ? fb : DASH); };
+  var num = function (v, fb) { return (typeof v === "number" && isFinite(v)) ? String(Math.round(v)) : (fb !== undefined ? fb : DASH); };
+  function ago(iso) {
+    var t = Date.parse(iso || "");
+    if (isNaN(t)) return null;
+    var m = Math.max(0, Math.round((Date.now() - t) / 60000));
+    if (m < 2) return "just now";
+    if (m < 60) return m + " min ago";
+    var h = Math.round(m / 60);
+    if (h < 36) return h + " h ago";
+    return Math.round(h / 24) + " d ago";
+  }
+
+  /* ── weather: pushed weather.json (<24h) else Open-Meteo ── */
+  var WMO = [
+    [0, "☀️", "Clear"], [1, "🌤", "Mostly clear"], [2, "⛅", "Partly cloudy"],
+    [3, "☁️", "Cloudy"], [45, "🌫", "Fog"], [48, "🌫", "Rime fog"],
+    [51, "🌦", "Light drizzle"], [53, "🌦", "Drizzle"], [55, "🌧", "Heavy drizzle"],
+    [56, "🌧", "Freezing drizzle"], [57, "🌧", "Freezing drizzle"],
+    [61, "🌧", "Light rain"], [63, "🌧", "Rain"], [65, "🌧", "Heavy rain"],
+    [66, "🌧", "Freezing rain"], [67, "🌧", "Freezing rain"],
+    [71, "🌨", "Light snow"], [73, "🌨", "Snow"], [75, "❄️", "Heavy snow"],
+    [77, "🌨", "Snow grains"], [80, "🌦", "Showers"], [81, "🌧", "Showers"],
+    [82, "🌧", "Heavy showers"], [85, "🌨", "Snow showers"], [86, "🌨", "Snow showers"],
+    [95, "⛈", "Thunderstorm"], [96, "⛈", "Thunderstorm"], [99, "⛈", "Thunderstorm"]
+  ];
+  function wmo(code) {
+    var best = ["·", DASH];
+    for (var i = 0; i < WMO.length; i++) if (WMO[i][0] <= code) best = [WMO[i][1], WMO[i][2]];
+    return best;
+  }
+  function compass(deg) {
+    if (typeof deg !== "number") return "";
+    return ["N","NE","E","SE","S","SW","W","NW"][Math.round(deg / 45) % 8];
+  }
+  var wxAt = null;
+  function renderWeather(d) {
+    d = d || {};
+    var cur = d.current || {};
+    var when = ago(d.fetchedAt);
+    wxAt = d.fetchedAt || null;
+
+    $("home-temp").textContent = num(cur.temp) + (typeof cur.temp === "number" ? "°" : "");
+    $("home-cond").textContent = str(cur.condition, "no data yet");
+    $("home-wx-when").textContent = when ? "updated " + when : "weather";
+
+    $("wx-icon").textContent = str(cur.icon, "");
+    $("wx-temp").textContent = num(cur.temp) + (typeof cur.temp === "number" ? "°" : "");
+    var meta = $("wx-meta");
+    meta.textContent = "";
+    if (cur.condition || cur.wind) {
+      meta.appendChild(el("b", "", str(cur.condition, "")));
+      var bits = [];
+      if (cur.wind) bits.push(str(cur.wind));
+      if (cur.humidity) bits.push("humidity " + str(cur.humidity));
+      meta.appendChild(el("div", "", bits.join(" · ")));
+      meta.appendChild(el("div", "", [str(d.location, "Queenstown"),
+        d.source ? "via " + str(d.source) : null, when].filter(Boolean).join(" · ")));
+    } else {
+      meta.textContent = "no forecast data yet";
+    }
+
+    var days = Array.isArray(d.days) ? d.days.slice(0, 7) : [];
+    var mini = $("home-days");
+    mini.textContent = "";
+    (days.length ? days.slice(0, 4) : [null, null, null, null]).forEach(function (day) {
+      var c = el("div", "cell");
+      c.appendChild(el("div", "cl", day ? str(day.day) : DASH));
+      c.appendChild(el("div", "ci", day ? str(day.icon, "·") : "·"));
+      c.appendChild(el("div", "cv", day ? num(day.high) + (typeof day.high === "number" ? "°" : "") : DASH));
+      c.appendChild(el("div", "cvsub", day && typeof day.low === "number" ? num(day.low) + "°" : DASH));
+      mini.appendChild(c);
+    });
+
+    var grid = $("wx-days");
+    grid.textContent = "";
+    (days.length ? days : [null, null, null, null, null]).forEach(function (day) {
+      var c = el("div", "wx-day");
+      c.appendChild(el("div", "cl", day ? [str(day.day),
+        day.date ? str(day.date).slice(8, 10) + "/" + str(day.date).slice(5, 7) : null]
+        .filter(Boolean).join(" ") : DASH));
+      c.appendChild(el("div", "ci", day ? str(day.icon, "·") : "·"));
+      c.appendChild(el("div", "hi", day ? num(day.high) + (typeof day.high === "number" ? "°" : "") : DASH));
+      c.appendChild(el("div", "lo", day && typeof day.low === "number" ? "low " + num(day.low) + "°" : DASH));
+      c.appendChild(el("div", "rain", day && day.rain ? "rain " + str(day.rain) : ""));
+      if (day && day.text) c.appendChild(el("div", "txt", str(day.text)));
+      grid.appendChild(c);
+    });
+    renderFreshness();
+  }
+  renderWeather(null);
+
+  var pushedWeather = null;
+  function weatherFresh(d) {
+    var t = Date.parse((d && d.fetchedAt) || "");
+    return !isNaN(t) && (Date.now() - t) < 24 * 3600 * 1000;
+  }
+  function fetchOpenMeteo() {
+    if (pushedWeather && weatherFresh(pushedWeather)) return;
+    var u = "https://api.open-meteo.com/v1/forecast?latitude=-45.031&longitude=168.663" +
+      "&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max" +
+      "&current=temperature_2m,weather_code,wind_speed_10m,wind_direction_10m,relative_humidity_2m" +
+      "&timezone=Pacific%2FAuckland&forecast_days=7";
+    fetch(u).then(function (r) { return r.json(); }).then(function (j) {
+      if (pushedWeather && weatherFresh(pushedWeather)) return;
+      var c = j.current || {};
+      var cw = wmo(c.weather_code || 0);
+      var days = [];
+      var dl = j.daily || {};
+      for (var i = 0; i < (dl.time || []).length; i++) {
+        var dw = wmo((dl.weather_code || [])[i] || 0);
+        var dt = new Date(dl.time[i] + "T12:00:00");
+        days.push({
+          day: ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"][dt.getDay()],
+          date: dl.time[i], icon: dw[0],
+          high: (dl.temperature_2m_max || [])[i],
+          low: (dl.temperature_2m_min || [])[i],
+          rain: typeof (dl.precipitation_probability_max || [])[i] === "number"
+            ? (dl.precipitation_probability_max)[i] + "%" : undefined
+        });
+      }
+      renderWeather({
+        location: "Queenstown", source: "Open-Meteo (auto)",
+        fetchedAt: new Date().toISOString(),
+        current: {
+          temp: c.temperature_2m, icon: cw[0], condition: cw[1],
+          wind: typeof c.wind_speed_10m === "number"
+            ? compass(c.wind_direction_10m) + " " + Math.round(c.wind_speed_10m) + " km/h" : undefined,
+          humidity: typeof c.relative_humidity_2m === "number" ? c.relative_humidity_2m + "%" : undefined
+        },
+        days: days
+      });
+    }).catch(function () {});
+  }
+  fetchOpenMeteo();
+  setInterval(fetchOpenMeteo, 15 * 60 * 1000);
+
+  /* ── snow rendering ────────────────────────────────────── */
+  var DEFAULT_RESORTS = [
+    { id: "coronet", name: "Coronet Peak",
+      cam: "https://public.aopa.nz/queenstown-coronet.jpg", camLabel: "aviation cam" },
+    { id: "remarks", name: "The Remarkables",
+      cam: "https://www.queenstown.com/cams/aspen.jpg", camLabel: "Queenstown town cam" },
+    { id: "cardrona", name: "Cardrona",
+      cam: "https://public.aopa.nz/wanaka-cardrona.jpg", camLabel: "valley cam" }
+  ];
+  var snowData = { resorts: DEFAULT_RESORTS };
+  function badgeFor(status) {
+    var s = (status || "").toLowerCase();
+    if (!s) return null;
+    var cls = /open/.test(s) ? "open" : /(hold|wind|weather|delay)/.test(s) ? "warn" : "off";
+    return el("span", "badge " + cls, status);
+  }
+  function camBust(u) {
+    if (typeof u !== "string" || u.indexOf("https://") !== 0) return null;
+    return u + (u.indexOf("?") < 0 ? "?" : "&") + "dt=" + Math.floor(Date.now() / 600000);
+  }
+  function renderSnow() {
+    var resorts = Array.isArray(snowData.resorts) && snowData.resorts.length
+      ? snowData.resorts : DEFAULT_RESORTS;
+
+    var rows = $("home-snow");
+    rows.textContent = "";
+    resorts.forEach(function (r) {
+      var rep = r.report || {};
+      var row = el("div", "stat");
+      row.appendChild(el("span", "", str(r.name)));
+      var wrap = el("div", "");
+      wrap.style.display = "flex"; wrap.style.gap = "1.2vmin"; wrap.style.alignItems = "center";
+      var bd = badgeFor(rep.status);
+      if (bd) wrap.appendChild(bd);
+      wrap.appendChild(el("b", "", [rep.base ? str(rep.base) : null,
+        rep.lifts ? "lifts " + str(rep.lifts) : null].filter(Boolean).join(" · ") || DASH));
+      row.appendChild(wrap);
+      rows.appendChild(row);
+    });
+    var when = ago(snowData.fetchedAt);
+    $("home-snow-when").textContent = when ? "updated " + when : "snow";
+
+    var grid = $("snow-grid");
+    grid.textContent = "";
+    resorts.forEach(function (r) {
+      var rep = r.report || {};
+      var cam = el("div", "cam");
+      var head = el("div", "pname", "");
+      head.appendChild(document.createTextNode(str(r.name)));
+      var bd = badgeFor(rep.status);
+      if (bd) head.appendChild(bd);
+      cam.appendChild(head);
+
+      var frame = el("div", "cam-frame");
+      var src = camBust(r.cam);
+      var img = el("img");
+      img.alt = str(r.name) + " cam";
+      var empty = el("div", "cam-empty");
+      empty.innerHTML =
+        '<svg viewBox="0 0 90 60" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round">' +
+        '<path d="M2 54 L28 18 L40 34 L52 10 L88 54 Z"/>' +
+        '<path d="M46 22 L52 10 L58 22" opacity=".6"/></svg>';
+      empty.appendChild(el("div", "", src ? "cam loading…" : "no cam configured"));
+      frame.appendChild(empty);
+      if (src) {
+        img.onload = function () { img.style.display = "block"; empty.style.display = "none"; };
+        img.onerror = function () { empty.lastChild.textContent = "cam unreachable"; };
+        img.src = src;
+      }
+      frame.appendChild(img);
+      cam.appendChild(frame);
+
+      var stats = el("div", "cam-stats");
+      var s1 = el("div", "stat"); s1.appendChild(el("span", "", "Base")); s1.appendChild(el("b", "", str(rep.base)));
+      var s2 = el("div", "stat"); s2.appendChild(el("span", "", "Lifts")); s2.appendChild(el("b", "", str(rep.lifts)));
+      stats.appendChild(s1); stats.appendChild(s2);
+      if (rep.note) {
+        var s3 = el("div", "stat"); s3.appendChild(el("span", "", "Word is")); s3.appendChild(el("b", "", str(rep.note)));
+        stats.appendChild(s3);
+      }
+      cam.appendChild(stats);
+      cam.appendChild(el("div", "cam-when",
+        [r.camLabel ? "live · " + str(r.camLabel) : null,
+         when ? "report " + when : "report pending"].filter(Boolean).join(" · ")));
+      grid.appendChild(cam);
+    });
+    renderFreshness();
+  }
+  renderSnow();
+  setInterval(renderSnow, 10 * 60 * 1000); // re-bust cam URLs
+
+  /* ── freshness footer ──────────────────────────────────── */
+  function renderFreshness() {
+    var bits = [];
+    if (wxAt) bits.push("weather " + ago(wxAt));
+    if (snowData && snowData.fetchedAt) bits.push("snow report " + ago(snowData.fetchedAt));
+    $("freshness").textContent = bits.join(" · ");
+  }
+  setInterval(renderFreshness, 60000);
+
+  /* ── state + snow polling via GitHub contents API ──────── */
+  var etags = {};
+  var pollMs = 20000;          // backs off if ETags aren't honored or rate-limited
+  var etagsWork = null;
+  function pull(name, onData) {
+    var headers = { "Accept": "application/vnd.github.raw+json" };
+    if (etags[name]) headers["If-None-Match"] = etags[name];
+    return fetch(REPO_API + name + "?ref=main", { headers: headers })
+      .then(function (r) {
+        if (r.status === 304) { etagsWork = true; return; }
+        if (r.status === 403 || r.status === 429) { pollMs = 5 * 60 * 1000; return; }
+        if (!r.ok) return;
+        var tag = r.headers.get("ETag");
+        if (tag) { etags[name] = tag; if (etagsWork === null) etagsWork = true; }
+        else if (etagsWork === null) { etagsWork = false; pollMs = 65000; }
+        return r.text().then(function (t) { onData(JSON.parse(t)); });
+      }).catch(function () {});
+  }
+  function applyState(d) {
+    d = d || {};
+    showView(str(d.view, "home"));
+    var note = typeof d.note === "string" ? d.note.trim() : "";
+    $("note-text").textContent = note || "Nothing on the board.";
+    var hn = $("homenote");
+    hn.textContent = note;
+    hn.style.display = note ? "block" : "none";
+    $("livedot").classList.add("on");
+    $("livelabel").textContent = "live";
+  }
+  function applySnow(d) { if (d) { snowData = d; renderSnow(); } }
+  function applyWeather(d) {
+    pushedWeather = d;
+    if (weatherFresh(d)) renderWeather(d); else fetchOpenMeteo();
+  }
+  function loop() {
+    pull("state.json", applyState).then(function () {
+      setTimeout(loop, pollMs);
+    });
+  }
+  loop();
+  function slowLoop() {
+    pull("snow.json", applySnow);
+    pull("weather.json", applyWeather);
+    setTimeout(slowLoop, Math.max(pollMs * 3, 60000));
+  }
+  slowLoop();
+
+  /* ── TV niceties ───────────────────────────────────────── */
+  var cursorTimer;
+  function bumpCursor() {
+    document.body.classList.remove("hide-cursor");
+    clearTimeout(cursorTimer);
+    cursorTimer = setTimeout(function () { document.body.classList.add("hide-cursor"); }, 4000);
+  }
+  addEventListener("mousemove", bumpCursor);
+  bumpCursor();
+
+  function wakeLock() {
+    try {
+      if (navigator.wakeLock) navigator.wakeLock.request("screen").catch(function () {});
+    } catch (e) {}
+  }
+  wakeLock();
+  document.addEventListener("visibilitychange",
+    function () { if (!document.hidden) wakeLock(); });
+
+  var now = new Date();
+  var next = new Date(now); next.setHours(4, 30, 0, 0);
+  if (next <= now) next.setDate(next.getDate() + 1);
+  setTimeout(function () { location.reload(); }, next - now);
+})();
+</script>
+</body>
+</html>
