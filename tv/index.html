@@ -15,8 +15,14 @@
        catches up). Always include a fresh "updatedAt" — the page
        ignores state older than what it already shows.
 
-  tv/data/state.json   { "view": "home"|"weather"|"snow"|"note",
+  tv/data/state.json   { "view": "home"|"weather"|"snow"|"map"|"radar"|"note",
+                         "layer": "radar"|"wind"|"temp"|"clouds",  // radar view only
                          "note": "...", "updatedAt": "<ISO>" }
+  "map" = rewiring.nz Electric Streets Map (may render blank — that
+          site's embed policy is unverified). "radar" = Windy.com,
+          centred on Queenstown, with on-screen layer chips (remote-
+          friendly — Windy's own UI needs a mouse); "layer" picks
+          which chip is active on arrival, default "radar".
   tv/data/snow.json    { "fetchedAt": "<ISO>", "resorts": [
                            { "id","name","cam": "<https image url>",
                              "camLabel": "...", "report": {
@@ -162,6 +168,18 @@
   .cam-stats .stat{font-size:1.6vmin;padding:.9vmin 0}
   .cam-when{font-size:1.3vmin;color:var(--dim)}
 
+  #view-map.on,#view-radar.on{flex-direction:column}
+  .map-frame{flex:1;min-height:0;background:var(--panel);border:1px solid var(--line);
+    border-radius:1.6vmin;overflow:hidden;position:relative}
+  .map-frame iframe{width:100%;height:100%;border:0;display:block;background:#fff}
+  .map-cap{padding-top:1.2vmin;font-size:1.4vmin;color:var(--dim)}
+  .chips{display:flex;gap:1.2vmin;padding-bottom:1.8vmin}
+  .chips button{background:var(--panel);border:1px solid var(--line);border-radius:1.2vmin;
+    color:var(--muted);font-family:var(--sans);font-size:1.6vmin;letter-spacing:.03em;
+    padding:1.1vmin 2.4vmin;cursor:pointer}
+  .chips button:focus{outline:none;border-color:var(--lamp)}
+  .chips button.on{color:var(--ink);border-color:var(--lamp);background:rgba(230,201,138,.12)}
+
   #view-note.on{align-items:center;justify-content:center;text-align:center}
   .note-big{font-family:var(--serif);font-size:6.5vmin;line-height:1.25;
     max-width:26ch;text-wrap:balance}
@@ -234,6 +252,22 @@
       <div class="snow-grid" id="snow-grid"></div>
     </section>
 
+    <section class="view" id="view-map">
+      <div class="map-frame" id="map-frame"></div>
+      <div class="map-cap">Live: rewiring.nz/electric-streets-map — if this stays blank, the site refuses to be embedded</div>
+    </section>
+
+    <section class="view" id="view-radar">
+      <div class="chips" id="radar-chips">
+        <button data-layer="radar" class="on">Rain radar</button>
+        <button data-layer="wind">Wind</button>
+        <button data-layer="temp">Temp</button>
+        <button data-layer="clouds">Clouds</button>
+      </div>
+      <div class="map-frame" id="radar-frame"></div>
+      <div class="map-cap">Live — Windy.com, centred on Queenstown</div>
+    </section>
+
     <section class="view" id="view-note">
       <div class="note-big" id="note-text">Nothing on the board.</div>
       <div class="note-hint">Say: “put a note on the TV”</div>
@@ -241,7 +275,7 @@
   </main>
 
   <footer class="foot">
-    <span class="hint">Talk to Claude: “show the snow cams” · “show the weather” · “back to home”</span>
+    <span class="hint">Talk to Claude: “show the snow cams” · “show the wind radar” · “back to home”</span>
     <span id="freshness"></span>
     <span class="right"><span class="live-dot" id="livedot"></span><span id="livelabel">connecting</span></span>
   </footer>
@@ -252,7 +286,32 @@
   "use strict";
   var $ = function (id) { return document.getElementById(id); };
   var DASH = "—";
-  var VIEWS = ["home", "weather", "snow", "note"];
+  var VIEWS = ["home", "weather", "snow", "map", "radar", "note"];
+  var MAP_URL = "https://www.rewiring.nz/electric-streets-map";
+  var RADAR_LAYERS = { radar: "Rain radar", wind: "Wind", temp: "Temp", clouds: "Clouds" };
+  var radarLayer = "radar";
+  function radarUrl(layer) {
+    return "https://embed.windy.com/embed2.html?lat=-45.031&lon=168.663" +
+      "&detailLat=-45.031&detailLon=168.663&width=1200&height=800&zoom=7" +
+      "&level=surface&overlay=" + layer + "&product=ecmwf&menu=&message=true" +
+      "&marker=&calendar=now&pressure=&type=map&location=coordinates&detail=" +
+      "&metricWind=km%2Fh&metricTemp=%C2%B0C&radarRange=-1";
+  }
+  function setRadarLayer(layer) {
+    if (!RADAR_LAYERS[layer]) layer = "radar";
+    radarLayer = layer;
+    var host = $("radar-frame");
+    var f = host.querySelector("iframe");
+    if (!f) {
+      f = document.createElement("iframe");
+      f.title = "Weather radar — Windy";
+      host.appendChild(f);
+    }
+    f.src = radarUrl(layer);
+    var chips = $("radar-chips").children;
+    for (var i = 0; i < chips.length; i++)
+      chips[i].classList.toggle("on", chips[i].getAttribute("data-layer") === layer);
+  }
 
   /* ── PIN gate: sha256("ideatious-wall|" + pin) ─────────── */
   var PIN_HASH = "515762c4534efeaaabf16ea2607f60f75fd6fc56281a71bd85dd2b49a7171425";
@@ -294,6 +353,10 @@
   $("pad").addEventListener("click", function (e) {
     var b = e.target.closest ? e.target.closest("button") : e.target;
     if (b && b.tagName === "BUTTON") keyIn(b.getAttribute("data-k") || b.textContent);
+  });
+  $("radar-chips").addEventListener("click", function (e) {
+    var b = e.target.closest ? e.target.closest("button") : null;
+    if (b) setRadarLayer(b.getAttribute("data-layer"));
   });
   document.addEventListener("keydown", function (e) {
     if ($("gate").classList.contains("off")) return;
@@ -337,6 +400,15 @@
       el.classList.toggle("on", on);
       requestAnimationFrame(function () { el.classList.toggle("shown", on); });
     });
+    // lazy-load each iframe only once it's actually needed
+    if (name === "map" && !$("map-frame").firstChild) {
+      var f = document.createElement("iframe");
+      f.src = MAP_URL;
+      f.referrerPolicy = "no-referrer-when-downgrade";
+      f.title = "Electric Streets Map — rewiring.nz";
+      $("map-frame").appendChild(f);
+    }
+    if (name === "radar" && !$("radar-frame").firstChild) setRadarLayer(radarLayer);
   }
   showView("home");
 
@@ -609,6 +681,7 @@
     if (t && t < stateTime) return;
     if (t) stateTime = t;
     showView(str(d.view, "home"));
+    if (d.view === "radar" && typeof d.layer === "string") setRadarLayer(d.layer);
     var note = typeof d.note === "string" ? d.note.trim() : "";
     $("note-text").textContent = note || "Nothing on the board.";
     var hn = $("homenote");
