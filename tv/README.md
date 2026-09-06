@@ -19,13 +19,13 @@ There are two editions sharing one design:
   1. **Push** (fast, ~1 s — the lane that makes "switch while I'm talking"
      real): `curl -d '<state json>' https://ntfy.sh/ideatious-wall-knw73kq3skxg`
   2. **Commit** (durable): the same JSON to `tv/data/state.json` on `main`,
-     reconciled by the page every ~45 s — this is what a TV that was off, or
+     reconciled by the page every ~80 s (rate-limit-aware backoff if it ever needs one) — this is what a TV that was off, or
      a session that couldn't reach ntfy, catches up from.
 
   Always set a fresh `updatedAt` — the page ignores state older than what
   it's already showing, so the slow lane can never undo what the fast lane
   just set. Egress-blocked session? Skip the push, still commit — the TV
-  catches up in ≤45 s instead of ~1 s.
+  catches up in ≤80 s instead of ~1 s.
 
   **Do not** rely on `raw.githubusercontent.com` for anything time-sensitive:
   it's Fastly-cached at `max-age=300` and does **not** vary on query string,
@@ -33,7 +33,7 @@ There are two editions sharing one design:
   (verified empirically). It's only used for `snow.json`/`weather.json`,
   polled every 5 min, where that staleness is fine. `api.github.com` is
   always live but rate-limited to 60 req/hr unauthenticated — fine for a
-  ~45 s reconciliation poll, too slow to be the primary control channel.
+  ~80 s reconciliation poll, too slow to be the primary control channel.
 - **Security honesty:** the PIN is a client-side deterrent, not real auth —
   fine for weather/cams/notes; don't put secrets on the wall. The PIN's
   SHA-256 (`sha256("ideatious-wall|" + pin)`) is embedded in `index.html`.

@@ -9,14 +9,14 @@
        actually work):
          curl -d '<the exact state json>' \
            https://ntfy.sh/ideatious-wall-knw73kq3skxg
-    2. COMMIT (durable — reconciled every ~45 s, and what a TV that was
+    2. COMMIT (durable — reconciled every ~80 s, and what a TV that was
        off or missed the push catches up from): commit the same JSON to
        tv/data/state.json on branch main.
   Always give the JSON a fresh "updatedAt" — the page ignores state
   older than what it's already showing, so lane 2 can never regress
   what lane 1 just set. If this session's egress is blocked (ntfy.sh
   unreachable), skip lane 1 silently and still do lane 2 — the TV will
-  catch up within ~45 s instead of ~1 s. Do NOT rely on
+  catch up within ~80 s instead of ~1 s. Do NOT rely on
   raw.githubusercontent.com for anything time-sensitive: it is Fastly-
   cached at max-age=300 and does not vary on query string, so a
   cache-busted poll of it can still be up to 5 minutes stale — it is
@@ -689,11 +689,19 @@
         });
       }).catch(function () {});
   }
+  var stateBackoffUntil = 0;   // epoch ms; set when GitHub says we're rate-limited
   function pullState() {
+    if (Date.now() < stateBackoffUntil) return Promise.resolve();
     return fetch(API + "state.json?ref=main&t=" + Date.now(),
       { cache: "no-store", headers: { "Accept": "application/vnd.github.raw+json" } })
       .then(function (r) {
         lastStateOk = Date.now(); // count a reachable GitHub as "connected" even on 403/304
+        var remaining = parseInt(r.headers.get("X-RateLimit-Remaining"), 10);
+        var resetAt = parseInt(r.headers.get("X-RateLimit-Reset"), 10);
+        if (!isNaN(remaining) && remaining <= 2 && !isNaN(resetAt)) {
+          // hold off polling until GitHub's hourly window rolls over, plus a buffer
+          stateBackoffUntil = resetAt * 1000 + 5000;
+        }
         if (!r.ok) return;
         return r.text().then(function (t) {
           if (t === lastSeen["state.json"]) return;
@@ -765,7 +773,10 @@
   // slow lane: GitHub is the durable truth, reconciled well under its
   // 60 req/hr unauthenticated limit — catches up a TV that was off or a
   // push that never arrived; not the path that makes switching feel fast.
-  function stateLoop() { pullState().then(function () { setTimeout(stateLoop, 45000); }); }
+  // 80s keeps this at 45/hr even with zero other traffic to the repo's
+  // unauthenticated 60/hr budget — the rate-limit backoff above is the
+  // real safety net if that budget still gets shared or exhausted.
+  function stateLoop() { pullState().then(function () { setTimeout(stateLoop, 80000); }); }
   stateLoop();
   function slowLoop() {
     pull("snow.json", applySnow);
