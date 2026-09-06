@@ -59,13 +59,15 @@
   #gate.off{display:none}
   #gate .brand{font-family:var(--serif);font-size:4vmin}
   #gate .brand .dot{color:var(--lamp)}
-  #gate input{background:var(--panel);border:1px solid var(--line);border-radius:1.2vmin;
-    color:var(--ink);font-family:var(--sans);font-size:3vmin;text-align:center;
-    letter-spacing:1vmin;padding:1.4vmin 2vmin;width:24vmin;outline:none}
-  #gate input:focus{border-color:var(--lamp)}
-  #gate button{background:var(--panel);border:1px solid var(--line);border-radius:1.2vmin;
-    color:var(--ink-mid);font-family:var(--sans);font-size:2vmin;padding:1.2vmin 3vmin;cursor:pointer}
-  #gate button:focus{border-color:var(--lamp);outline:none}
+  #gate .dots{display:flex;gap:1.6vmin;min-height:2.4vmin}
+  #gate .dots i{width:2vmin;height:2vmin;border-radius:50%;border:1px solid var(--line);
+    background:var(--panel)}
+  #gate .dots i.fill{background:var(--lamp);border-color:var(--lamp)}
+  .pad{display:grid;grid-template-columns:repeat(3,10vmin);gap:1.4vmin}
+  .pad button{background:var(--panel);border:1px solid var(--line);border-radius:1.2vmin;
+    color:var(--ink);font-family:var(--sans);font-size:3vmin;padding:1.6vmin 0;cursor:pointer}
+  .pad button:focus{border-color:var(--lamp);background:#22262d;outline:none}
+  .pad button.aux{color:var(--muted);font-size:2vmin}
   #gate .wrong{color:var(--warn);font-size:1.8vmin;min-height:2.4vmin}
 
   .wall{height:100vh;display:flex;flex-direction:column;padding:3.2vmin 3.6vmin 2.2vmin}
@@ -171,8 +173,13 @@
 
 <div id="gate">
   <div class="brand">ıdeatious<span class="dot">.</span></div>
-  <input id="pin" type="password" inputmode="numeric" maxlength="8" autocomplete="off" aria-label="PIN">
-  <button id="unlock">Unlock</button>
+  <div class="dots" id="dots"><i></i><i></i><i></i><i></i></div>
+  <div class="pad" id="pad">
+    <button>1</button><button>2</button><button>3</button>
+    <button>4</button><button>5</button><button>6</button>
+    <button>7</button><button>8</button><button>9</button>
+    <button class="aux" data-k="clear">clear</button><button>0</button><button class="aux" data-k="back">⌫</button>
+  </div>
   <div class="wrong" id="wrong"></div>
 </div>
 
@@ -251,23 +258,47 @@
         }).join("");
       });
   }
-  function tryUnlock() {
-    sha256hex("ideatious-wall|" + $("pin").value.trim()).then(function (h) {
+  var entered = "";
+  function drawDots() {
+    var dots = $("dots").children;
+    for (var i = 0; i < dots.length; i++)
+      dots[i].className = i < entered.length ? "fill" : "";
+  }
+  function checkPin() {
+    drawDots();
+    if (!entered.length) return;
+    sha256hex("ideatious-wall|" + entered).then(function (h) {
       if (h === PIN_HASH) {
         try { localStorage.setItem("wall-unlocked", h); } catch (e) {}
         $("gate").classList.add("off");
-      } else {
+      } else if (entered.length >= 8) {
         $("wrong").textContent = "Not it — try again.";
-        $("pin").value = "";
+        entered = "";
+        drawDots();
       }
     });
   }
-  $("unlock").addEventListener("click", tryUnlock);
-  $("pin").addEventListener("keydown", function (e) { if (e.key === "Enter") tryUnlock(); });
+  function keyIn(k) {
+    $("wrong").textContent = "";
+    if (k === "clear") entered = "";
+    else if (k === "back") entered = entered.slice(0, -1);
+    else entered += k;
+    checkPin();
+  }
+  $("pad").addEventListener("click", function (e) {
+    var b = e.target.closest ? e.target.closest("button") : e.target;
+    if (b && b.tagName === "BUTTON") keyIn(b.getAttribute("data-k") || b.textContent);
+  });
+  document.addEventListener("keydown", function (e) {
+    if ($("gate").classList.contains("off")) return;
+    if (e.key >= "0" && e.key <= "9") keyIn(e.key);
+    else if (e.key === "Backspace") { keyIn("back"); e.preventDefault(); }
+  });
   try {
     if (localStorage.getItem("wall-unlocked") === PIN_HASH) $("gate").classList.add("off");
-    else $("pin").focus();
-  } catch (e) { $("pin").focus(); }
+  } catch (e) {}
+  var firstKey = document.querySelector("#pad button");
+  if (firstKey) firstKey.focus();
 
   /* ── clock ─────────────────────────────────────────────── */
   var DAYS = ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"];
