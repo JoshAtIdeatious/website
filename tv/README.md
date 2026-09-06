@@ -15,14 +15,25 @@ There are two editions sharing one design:
   Claude needed). A pushed `tv/data/weather.json` (MetService numbers, same
   schema as below) overrides it while `fetchedAt` is under 24 h old.
 - **Snow cams:** hot-linked live stills, cache-busted every 10 min.
-- **Control (two lanes):** the page polls `tv/data/state.json` on `main` via
-  raw.githubusercontent.com every 5 s (snow/weather JSON every 5 min), AND
-  listens on a push channel for instant flips. To switch views, commit the
-  JSON to main **and** POST the same state JSON to
-  `https://ntfy.sh/ideatious-wall-knw73kq3skxg` (curl -d) — the push lands in
-  ~1 s, the commit is the durable truth the poll confirms. Egress-blocked
-  session? Just commit; the poll catches up in ≤5 s after the CDN sees it.
-  Always set a fresh `updatedAt`; the page ignores stale state.
+- **Control — two lanes, use both:**
+  1. **Push** (fast, ~1 s — the lane that makes "switch while I'm talking"
+     real): `curl -d '<state json>' https://ntfy.sh/ideatious-wall-knw73kq3skxg`
+  2. **Commit** (durable): the same JSON to `tv/data/state.json` on `main`,
+     reconciled by the page every ~45 s — this is what a TV that was off, or
+     a session that couldn't reach ntfy, catches up from.
+
+  Always set a fresh `updatedAt` — the page ignores state older than what
+  it's already showing, so the slow lane can never undo what the fast lane
+  just set. Egress-blocked session? Skip the push, still commit — the TV
+  catches up in ≤45 s instead of ~1 s.
+
+  **Do not** rely on `raw.githubusercontent.com` for anything time-sensitive:
+  it's Fastly-cached at `max-age=300` and does **not** vary on query string,
+  so a cache-busted poll can still return content up to 5 minutes stale
+  (verified empirically). It's only used for `snow.json`/`weather.json`,
+  polled every 5 min, where that staleness is fine. `api.github.com` is
+  always live but rate-limited to 60 req/hr unauthenticated — fine for a
+  ~45 s reconciliation poll, too slow to be the primary control channel.
 - **Security honesty:** the PIN is a client-side deterrent, not real auth —
   fine for weather/cams/notes; don't put secrets on the wall. The PIN's
   SHA-256 (`sha256("ideatious-wall|" + pin)`) is embedded in `index.html`.
