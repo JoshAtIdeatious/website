@@ -4,9 +4,16 @@
   IDEATIOUS WALL — website edition, served at ideatious.com/tv
   CLAUDE PROTOCOL (how any Claude session drives this page)
   ═══════════════════════════════════════════════════════════════════
-  The TV polls tv/data/*.json ON BRANCH MAIN of JoshAtIdeatious/website
-  via the GitHub contents API (ETag-conditional, ~20 s). To change what
-  the TV shows, commit the JSON to main — no page rebuild needed.
+  The TV reads tv/data/*.json ON BRANCH MAIN of JoshAtIdeatious/website
+  via raw.githubusercontent.com (cache-busted, state every 5 s; snow +
+  weather every 5 min). To change what the TV shows, do BOTH:
+    1. Commit the JSON to main (the durable truth — survives reloads).
+    2. For an instant (~1 s) flip, ALSO POST the same state JSON to the
+       push channel:  curl -d '<state json>' \
+         https://ntfy.sh/ideatious-wall-knw73kq3skxg
+       (skip silently if this host is egress-blocked; the 5 s poll
+       catches up). Always include a fresh "updatedAt" — the page
+       ignores state older than what it already shows.
 
   tv/data/state.json   { "view": "home"|"weather"|"snow"|"note",
                          "note": "...", "updatedAt": "<ISO>" }
@@ -246,7 +253,6 @@
   var $ = function (id) { return document.getElementById(id); };
   var DASH = "—";
   var VIEWS = ["home", "weather", "snow", "note"];
-  var REPO_API = "https://api.github.com/repos/JoshAtIdeatious/website/contents/tv/data/";
 
   /* ── PIN gate: sha256("ideatious-wall|" + pin) ─────────── */
   var PIN_HASH = "515762c4534efeaaabf16ea2607f60f75fd6fc56281a71bd85dd2b49a7171425";
@@ -304,10 +310,11 @@
   var DAYS = ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"];
   var MONTHS = ["January","February","March","April","May","June","July",
                 "August","September","October","November","December"];
+  function pad2(v) { v = String(v); return v.length < 2 ? "0" + v : v; }
   function tick() {
     var n = new Date();
-    var hh = String(n.getHours()).padStart(2, "0");
-    var mm = String(n.getMinutes()).padStart(2, "0");
+    var hh = pad2(n.getHours());
+    var mm = pad2(n.getMinutes());
     var date = DAYS[n.getDay()] + " " + n.getDate() + " " + MONTHS[n.getMonth()];
     $("topclock").textContent = hh + ":" + mm;
     $("topdate").textContent = date;
@@ -577,34 +584,36 @@
   }
   setInterval(renderFreshness, 60000);
 
-  /* ── state + snow polling via GitHub contents API ──────── */
-  var etags = {};
-  var pollMs = 20000;          // backs off if ETags aren't honored or rate-limited
-  var etagsWork = null;
+  /* ── state via raw CDN poll (5 s) + ntfy instant push ──── */
+  var RAW = "https://raw.githubusercontent.com/JoshAtIdeatious/website/main/tv/data/";
+  var NTFY = "https://ntfy.sh/ideatious-wall-knw73kq3skxg";
+  var lastSeen = {};
+  var lastStateOk = 0;
+  var stateTime = 0;
   function pull(name, onData) {
-    var headers = { "Accept": "application/vnd.github.raw+json" };
-    if (etags[name]) headers["If-None-Match"] = etags[name];
-    return fetch(REPO_API + name + "?ref=main", { headers: headers })
+    return fetch(RAW + name + "?t=" + Date.now(), { cache: "no-store" })
       .then(function (r) {
-        if (r.status === 304) { etagsWork = true; return; }
-        if (r.status === 403 || r.status === 429) { pollMs = 5 * 60 * 1000; return; }
         if (!r.ok) return;
-        var tag = r.headers.get("ETag");
-        if (tag) { etags[name] = tag; if (etagsWork === null) etagsWork = true; }
-        else if (etagsWork === null) { etagsWork = false; pollMs = 65000; }
-        return r.text().then(function (t) { onData(JSON.parse(t)); });
+        return r.text().then(function (t) {
+          if (name === "state.json") lastStateOk = Date.now();
+          if (t === lastSeen[name]) return;
+          lastSeen[name] = t;
+          onData(JSON.parse(t));
+        });
       }).catch(function () {});
   }
   function applyState(d) {
     d = d || {};
+    // never let an older polled state overwrite a fresher pushed one
+    var t = Date.parse(d.updatedAt || "") || 0;
+    if (t && t < stateTime) return;
+    if (t) stateTime = t;
     showView(str(d.view, "home"));
     var note = typeof d.note === "string" ? d.note.trim() : "";
     $("note-text").textContent = note || "Nothing on the board.";
     var hn = $("homenote");
     hn.textContent = note;
     hn.style.display = note ? "block" : "none";
-    $("livedot").classList.add("on");
-    $("livelabel").textContent = "live";
   }
   function applySnow(d) { if (d) { snowData = d; renderSnow(); } }
   function applyWeather(d) {
@@ -612,17 +621,32 @@
     if (weatherFresh(d)) renderWeather(d); else fetchOpenMeteo();
   }
   function loop() {
-    pull("state.json", applyState).then(function () {
-      setTimeout(loop, pollMs);
-    });
+    pull("state.json", applyState).then(function () { setTimeout(loop, 5000); });
   }
   loop();
   function slowLoop() {
     pull("snow.json", applySnow);
     pull("weather.json", applyWeather);
-    setTimeout(slowLoop, Math.max(pollMs * 3, 60000));
+    setTimeout(slowLoop, 5 * 60 * 1000);
   }
   slowLoop();
+  // instant lane: any Claude session POSTs the state JSON to the ntfy
+  // topic and the wall flips in ~1 s; the git commit remains the truth
+  try {
+    var es = new EventSource(NTFY + "/sse");
+    es.onmessage = function (e) {
+      try {
+        var st = JSON.parse(JSON.parse(e.data).message);
+        if (st && typeof st.view === "string") applyState(st);
+      } catch (err) {}
+    };
+  } catch (e) {}
+  // connection dot: green while state polls are landing
+  setInterval(function () {
+    var ok = lastStateOk && (Date.now() - lastStateOk) < 30000;
+    $("livedot").classList.toggle("on", !!ok);
+    $("livelabel").textContent = ok ? "live" : "reconnecting…";
+  }, 5000);
 
   /* ── TV niceties ───────────────────────────────────────── */
   var cursorTimer;
