@@ -15,8 +15,14 @@ There are two editions sharing one design:
   Claude needed). A pushed `tv/data/weather.json` (MetService numbers, same
   schema as below) overrides it while `fetchedAt` is under 24 h old.
 - **Snow cams:** hot-linked live stills, cache-busted every 10 min.
-- **Control:** the page polls `tv/data/*.json` on `main` via the GitHub
-  contents API (ETag-conditional, ~20 s). View switches land in ~10–25 s.
+- **Control (two lanes):** the page polls `tv/data/state.json` on `main` via
+  raw.githubusercontent.com every 5 s (snow/weather JSON every 5 min), AND
+  listens on a push channel for instant flips. To switch views, commit the
+  JSON to main **and** POST the same state JSON to
+  `https://ntfy.sh/ideatious-wall-knw73kq3skxg` (curl -d) — the push lands in
+  ~1 s, the commit is the durable truth the poll confirms. Egress-blocked
+  session? Just commit; the poll catches up in ≤5 s after the CDN sees it.
+  Always set a fresh `updatedAt`; the page ignores stale state.
 - **Security honesty:** the PIN is a client-side deterrent, not real auth —
   fine for weather/cams/notes; don't put secrets on the wall. The PIN's
   SHA-256 (`sha256("ideatious-wall|" + pin)`) is embedded in `index.html`.
