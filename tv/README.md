@@ -40,13 +40,17 @@ Commit JSON to **`main`** — `tv/data/` only; no page rebuild is involved:
 | "put a note on the TV: …" | `{"view": "note", "note": "…"}` |
 | "update the snow report" | `tv/data/snow.json` (schema below) |
 | "update the TV weather" (optional) | `tv/data/weather.json` |
+| "show the electric streets map" | `{"view": "map"}` |
+| "show the [rain/wind/temp/cloud] radar" | `{"view": "radar", "layer": "radar"\|"wind"\|"temp"\|"clouds"}` |
 
 Schemas (omit unknown values — the page shows an em-dash; **never invent
 numbers**):
 
 ```json
 // tv/data/state.json
-{ "view": "home|weather|snow|note", "note": "", "updatedAt": "<ISO>" }
+{ "view": "home|weather|snow|map|radar|note",
+  "layer": "radar|wind|temp|clouds",   // radar view only, default "radar"
+  "note": "", "updatedAt": "<ISO>" }
 
 // tv/data/snow.json
 { "fetchedAt": "<ISO>", "resorts": [
@@ -75,6 +79,20 @@ numbers**):
   theremarkables.co.nz/weather-report · cardrona-treblecone.com/webcams
 
 Snow reports: those weather-report pages, or OnTheSnow / snow-forecast.com.
+
+### Map & radar views
+
+- **`map`** embeds `rewiring.nz/electric-streets-map` directly. Its embed
+  policy (X-Frame-Options / CSP `frame-ancestors`) was never verified — this
+  repo's build sessions can't reach that host. If it renders blank on the
+  TV, the site refuses framing; the fix is a different presentation (e.g. a
+  QR code to open it on a phone) rather than the iframe.
+- **`radar`** embeds Windy.com (explicitly built for iframe embedding, so it
+  won't go blank), centred on Queenstown at zoom 7. Windy's own in-iframe
+  layer picker needs a mouse, so the page draws its own remote-friendly
+  chip row (Rain radar / Wind / Temp / Clouds) above the frame — clicking a
+  chip reloads the iframe with that overlay; `state.json`'s `layer` field
+  picks one on arrival for voice control.
 
 ## 2. Artifact edition — fast path (~1 s switching, needs claude.ai login)
 
