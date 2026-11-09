@@ -1,0 +1,19 @@
+{
+  "name": "ideatious-voice-mcp",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Remote MCP server giving Claude (incl. voice mode) live web page access.",
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "dev": "node dev-server.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.32.2",
+    "@mozilla/readability": "0.6.0",
+    "@sparticuz/chromium": "153.0.0",
+    "linkedom": "0.18.15",
+    "puppeteer-core": "25.16.0",
+    "zod": "3.25.76"
+  }
+}

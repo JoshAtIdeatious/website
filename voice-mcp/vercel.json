@@ -1,0 +1,6 @@
+{
+  "rewrites": [{ "source": "/mcp/:token", "destination": "/api/mcp?token=:token" }],
+  "functions": {
+    "api/mcp.js": { "memory": 2048, "maxDuration": 60 }
+  }
+}
