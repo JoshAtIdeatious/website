@@ -86,6 +86,8 @@ for await (const raw of rl) {
   const routes = routesOf.get(id) || [];
   if (!TRAIL.test(t.highway || '') && !routes.length) continue;
   if (/^(private|no)$/.test(t.access || '')) continue;
+  if (!t.highway || /^(proposed|construction|platform)$/.test(t.highway)) continue;   // ferries, gondolas etc. in routes
+  if (/^(sidewalk|crossing)$/.test(t.footway || '') || t.cycleway === 'crossing' || t.path === 'sidewalk') continue;
   const p = { ...pick(t), _id: `w${id}`, _grade: osmGrade(t), ...classify(t, routes) };
   if (routes.length) {
     p._routes = [...new Set(routes.map(r => r.name).filter(Boolean))].join(', ');
@@ -112,4 +114,4 @@ for (const [name, service] of [['doc_tracks', 'DOC_Tracks_Open_Data'], ['doc_hut
   console.log(`${name}: ${feats.length}`);
 }
 
-writeFileSync(join(outDir, 'meta.json'), JSON.stringify({ built: new Date().toISOString(), counts, sources: ['OpenStreetMap (Geofabrik NZ extract), ODbL', 'Department of Conservation, CC BY 4.0'] }, null, 2));
+writeFileSync(join(outDir, 'meta.json'), JSON.stringify({ built: new Date().toISOString(), counts, sources: ['OpenStreetMap NZ data, © OpenStreetMap contributors, ODbL 1.0', 'Department of Conservation, CC BY 4.0'] }, null, 2));

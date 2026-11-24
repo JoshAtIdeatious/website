@@ -62,14 +62,14 @@ export const PRESETS = {
     tiles: { layer: 'trails' },
     group: 'OpenStreetMap', source: 'osm', kind: 'line', name: 'All trails (combined)',
     desc: 'Paths, tracks, cycleways & route relations merged — each trail once, tagged bike/walk', grades: true, combined: true,
-    query: `(way["highway"~"^(path|footway|bridleway|cycleway|steps|track)$"]["access"!~"^(private|no)$"](${B});rel["route"~"^(mtb|bicycle|hiking|foot|walking)$"](${B});way(r)(${B});)->.a;way.a;out tags geom;rel.a;out body;`,
+    query: `(way["highway"~"^(path|footway|bridleway|cycleway|steps|track)$"]["access"!~"^(private|no)$"]["footway"!~"^(sidewalk|crossing)$"](${B});rel["route"~"^(mtb|bicycle|hiking|foot|walking)$"](${B});way(r)(${B});)->.a;way.a;out tags geom;rel.a;out body;`,
     style: LINE('#ff4d2e', { bike: 'side', width: 2.2 }),
   },
   'osm-hiking': {
     tiles: { layer: 'trails', filter: ['in', ['get', 'highway'], ['literal', ['path', 'footway', 'bridleway', 'steps']]] },
     group: 'OpenStreetMap', source: 'osm', kind: 'line', name: 'Walking & tramping tracks',
     desc: 'Paths, footways and bridleways', grades: true,
-    query: `(way["highway"~"^(path|footway|bridleway|steps)$"]["access"!~"^(private|no)$"](${B}););out tags geom;`,
+    query: `(way["highway"~"^(path|footway|bridleway|steps)$"]["access"!~"^(private|no)$"]["footway"!~"^(sidewalk|crossing)$"](${B}););out tags geom;`,
     style: LINE('#ff4d2e', { dash: 'dash' }),
   },
   'osm-mtb': {
@@ -239,7 +239,7 @@ export function osmToGeoJSON(json) {
     let geometry = null;
     if (el.type === 'node' && el.lat != null) geometry = { type: 'Point', coordinates: [el.lon, el.lat] };
     else if (el.center) geometry = { type: 'Point', coordinates: [el.center.lon, el.center.lat] };
-    else if (el.type === 'way' && el.geometry) {
+    else if (el.type === 'way' && el.geometry && (el.tags?.highway || !routesOf.has(el.id))) {
       const coords = el.geometry.filter(Boolean).map(p => [p.lon, p.lat]);
       if (coords.length >= 2) geometry = { type: 'LineString', coordinates: coords };
     }
