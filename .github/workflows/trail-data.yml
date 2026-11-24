@@ -29,8 +29,18 @@ jobs:
       - name: Install osmium and tippecanoe
         run: sudo apt-get update -q && sudo apt-get install -y -q osmium-tool tippecanoe
 
-      - name: Download NZ OpenStreetMap extract (Geofabrik)
-        run: curl -L --fail --retry 3 -o nz.osm.pbf https://download.geofabrik.de/australia-oceania/new-zealand-latest.osm.pbf
+      - name: Download NZ OpenStreetMap extract
+        run: |
+          # Geofabrik first, then the OpenStreetMap France mirror. Same OSM data, both ODbL.
+          for url in \
+            https://download.geofabrik.de/australia-oceania/new-zealand-latest.osm.pbf \
+            https://download.openstreetmap.fr/extracts/oceania/new_zealand-latest.osm.pbf; do
+            echo "Trying $url"
+            if curl -L --fail --retry 4 --retry-all-errors --retry-delay 20 --connect-timeout 30 -o nz.osm.pbf "$url"; then
+              osmium fileinfo nz.osm.pbf | head -20 && exit 0
+            fi
+          done
+          echo "No OSM extract source reachable" && exit 1
 
       - name: Filter to trails, routes and outdoor points
         run: |
