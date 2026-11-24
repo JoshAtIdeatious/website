@@ -30,6 +30,7 @@
 
     <form id="search" class="search" autocomplete="off">
       <input id="search-q" type="search" placeholder="Search a place (e.g. Ben Lomond)" aria-label="Search place">
+      <span class="search__credit">Search: Nominatim · © OpenStreetMap contributors</span>
       <ul id="search-results" hidden></ul>
     </form>
 
@@ -76,7 +77,18 @@
         <label class="row indent">Strength <input type="range" id="t-hillshade-strength" min="0.05" max="1" step="0.05"></label>
         <label class="check"><input type="checkbox" id="t-contours"> Contours (LINZ 20 m)</label>
         <div class="row indent">Colour <input type="color" id="t-contour-color"> <input type="range" id="t-contour-opacity" min="0.1" max="1" step="0.05" aria-label="Contour opacity"></div>
-        <label class="check"><input type="checkbox" id="t-labels"> Place &amp; peak names (LINZ)</label>
+      </div>
+
+      <div class="group">
+        <div class="group__head">
+          <h2>Place labels</h2>
+          <label class="check small"><input type="checkbox" id="t-labels"> Show</label>
+        </div>
+        <div id="place-editor">
+          <p class="muted small">Official NZ place names from LINZ. Pick which kinds show and how they look. For small villages and localities, add <b>Villages &amp; localities</b> on the Trails tab.</p>
+          <div id="place-cats"></div>
+          <div class="row">Halo <div class="split"><input type="color" id="place-halo"><input type="range" id="place-halo-w" min="0" max="4" step="0.1" aria-label="Halo width"></div></div>
+        </div>
       </div>
     </section>
 
@@ -152,6 +164,12 @@
           <textarea id="p-credits" rows="3"></textarea>
         </label>
         <button class="btn ghost small" id="p-credits-auto" type="button">Rebuild credits from layers</button>
+        <label class="stack" style="margin-top:10px">Published by (for the © line) <input type="text" id="p-publisher" placeholder="e.g. Ideatious Ltd"></label>
+        <div class="checks">
+          <label class="check"><input type="checkbox" id="p-show-fine"> Fine print</label>
+          <label class="check"><input type="checkbox" id="p-safety"> Safety note</label>
+        </div>
+        <p class="muted small" id="p-fine-preview"></p>
       </div>
 
       <div class="group">
@@ -170,7 +188,7 @@
     </section>
 
     <footer class="foot">
-      <button class="link" id="btn-credits" type="button">Licences &amp; credits</button>
+      <button class="link" id="btn-credits" type="button">Licences &amp; terms</button>
       <button class="link" id="btn-settings" type="button">Settings</button>
     </footer>
   </aside>

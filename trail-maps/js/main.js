@@ -1,6 +1,6 @@
 import { getKey, setCustomKey, isCustomKey, loadCatalog, loadTopoStyle, FIXED_BASES, findBase, intersects, coverage, BASEMAPS } from './linz.js';
 import { PRESETS, LICENCES, GRADES, fetchOSM, fetchDOC, parseFile, bboxOf } from './sources.js';
-import { buildStyle, attachIcons, FONTS, DASHES } from './style.js';
+import { buildStyle, attachIcons, FONTS, DASHES, ROAD_CLASSES, PLACE_CATS, roadLook } from './style.js';
 import { printGeometry, boundsOf, niceScale, renderPrint, encode, worldFile, download, paperSize } from './export.js';
 
 const $ = s => document.querySelector(s);
@@ -13,12 +13,24 @@ const DEFAULTS = {
   imagery: { base: 'aerial', opacity: 1, brightness: 0, contrast: 0, saturation: 0, fillGaps: true },
   terrain: { hillshade: false, hillshadeStrength: 0.35, contours: false, contourColor: '#c8691a', contourOpacity: 0.7, labels: true },
   labelFont: 'Open Sans Bold',
+  places: {
+    halo: '#ffffff', haloWidth: 1.6,
+    cats: {
+      city: { on: true, color: '#1b1b1b', size: 16, font: 'Roboto Bold', caps: true },
+      town: { on: true, color: '#1b1b1b', size: 13, font: 'Roboto Bold', caps: false },
+      suburb: { on: true, color: '#333333', size: 11, font: 'Roboto Regular', caps: false },
+      water: { on: true, color: '#1d5f8c', size: 12, font: 'Open Sans Italic', caps: false },
+      peak: { on: true, color: '#4a3420', size: 11, font: 'Roboto Italic', caps: false },
+      island: { on: true, color: '#1b1b1b', size: 12, font: 'Roboto Regular', caps: false },
+    },
+  },
   layers: [],
   print: {
     paper: 'A3', orientation: 'portrait', customW: 500, customH: 700, dpi: 300, bleed: 0,
     scaleMode: 'fit', scale: 25000, title: '', subtitle: '', titleFont: 'Barlow Condensed',
     showTitle: true, showLegend: true, showScale: true, showNorth: true, showAttribution: true, showCropMarks: false,
     credits: '', creditsEdited: false, format: 'png', worldFile: false, frame: true,
+    publisher: '', showFinePrint: true, safety: true,
   },
 };
 
@@ -262,6 +274,37 @@ const setters = [
   bind('#t-contour-opacity', TER, 'contourOpacity', { num: true }),
   bind('#t-labels', TER, 'labels', { check: true }),
 ];
+// ---- Place labels -----------------------------------------------------------------------
+function renderPlaceEditor() {
+  const P = state.places;
+  const fontOpts = cur => FONTS.map(f => `<option ${f === cur ? 'selected' : ''}>${f}</option>`).join('');
+  $('#place-cats').innerHTML = PLACE_CATS.map(c => {
+    const st = P.cats[c.k];
+    return `<div class="pcat ${st.on ? '' : 'off'}" data-cat="${c.k}">
+      <label class="check"><input type="checkbox" data-p="on" ${st.on ? 'checked' : ''}> ${c.label}</label>
+      <div class="pcat__row">
+        <input type="color" data-p="color" value="${st.color}" title="Colour">
+        <input type="number" data-p="size" min="6" max="40" step="0.5" value="${st.size}" title="Size (px)">
+        <select data-p="font" title="Font">${fontOpts(st.font)}</select>
+        <label class="caps" title="Capitals"><input type="checkbox" data-p="caps" ${st.caps ? 'checked' : ''}>AA</label>
+      </div>
+    </div>`;
+  }).join('');
+  $('#place-halo').value = P.halo;
+  $('#place-halo-w').value = P.haloWidth;
+}
+$('#place-cats').addEventListener('input', e => {
+  const el = e.target, row = el.closest('[data-cat]');
+  if (!row || !el.dataset.p) return;
+  const st = state.places.cats[row.dataset.cat];
+  st[el.dataset.p] = el.type === 'checkbox' ? el.checked : el.type === 'number' ? (parseFloat(el.value) || st.size) : el.value;
+  row.classList.toggle('off', !st.on);
+  syncMap();
+});
+$('#place-halo').addEventListener('input', e => { state.places.halo = e.target.value; syncMap(); });
+$('#place-halo-w').addEventListener('input', e => { state.places.haloWidth = parseFloat(e.target.value); syncMap(); });
+$('#t-labels').addEventListener('change', () => { $('#place-editor').hidden = !state.terrain.labels; });
+
 $('#img-reset').addEventListener('click', () => {
   Object.assign(state.imagery, { opacity: 1, brightness: 0, contrast: 0, saturation: 0 });
   setters.forEach(s => s()); syncMap();
@@ -276,10 +319,10 @@ function renderPresetGrid() {
   const groups = {};
   for (const [id, p] of Object.entries(PRESETS)) if (id !== 'file') (groups[p.group] ||= []).push([id, p]);
   $('#preset-grid').innerHTML = Object.entries(groups).map(([g, items]) => `
-    <h3>${esc(g)} <span class="muted small" style="text-transform:none;letter-spacing:0">· ${LICENCES[items[0][1].source].licence}, commercial OK</span></h3>
+    <h3>${esc(g)} <span class="muted small" style="text-transform:none;letter-spacing:0">· ${[...new Set(items.map(([, p]) => LICENCES[p.source].licence))].join(' / ')}, commercial OK</span></h3>
     <div class="preset-grid">${items.map(([id, p]) => `
       <button type="button" class="preset" data-preset="${id}">
-        <i style="background:${p.style.colorBy === 'grade' ? `linear-gradient(90deg,${GRADES.slice(0, 4).map(g => g.color).join(',')})` : p.style.color};${p.style.color === '#ffffff' || p.style.color === '#f5f5f5' ? 'outline:1px solid #999' : ''}"></i>
+        <i style="background:${p.kind === 'roads' ? `linear-gradient(90deg,${p.style.hwyColor} 50%,#999 50%)` : p.style.colorBy === 'grade' ? `linear-gradient(90deg,${GRADES.slice(0, 4).map(g => g.color).join(',')})` : p.style.color};${p.style.color === '#ffffff' || p.style.color === '#f5f5f5' ? 'outline:1px solid #999' : ''}"></i>
         <span><b>${esc(p.name)}</b><span>${esc(p.desc)}</span></span>
       </button>`).join('')}</div>`).join('');
 }
@@ -300,10 +343,10 @@ function addLayer(presetId, extra = {}) {
     style: { ...clone(p.style), labelFont: state.labelFont }, data: null, status: 'empty', expanded: false,
     query: p.custom ? p.query : undefined, attribution: '', ...extra,
   };
-  state.layers.unshift(L);
+  if (L.kind === 'roads') { L.style.labelFont = 'Open Sans Regular'; state.layers.push(L); } else state.layers.unshift(L);
   renderLayers(); syncMap(); refreshCredits();
   if (L.source === 'osm' || L.source === 'doc') loadLayer(L);
-  else if (L.source === 'linz') toast('LINZ tracks show from zoom ~12 — zoom in if you don’t see them.');
+  else if (L.source === 'linz' && L.kind !== 'roads') toast('LINZ tracks show from zoom ~12 — zoom in if you don’t see them.');
   return L;
 }
 
@@ -367,6 +410,7 @@ const ICON = {
 
 function swatch(L) {
   const s = L.style;
+  if (L.kind === 'roads') return `<svg class="layer__sw" viewBox="0 0 26 14" style="background:#8a8f7a"><line x1="0" y1="7" x2="13" y2="7" stroke="${s.casingColor}" stroke-width="7"/><line x1="0" y1="7" x2="13" y2="7" stroke="${s.hwyColor}" stroke-width="5"/><line x1="13" y1="7" x2="26" y2="7" stroke="${s.casingColor}" stroke-width="5"/><line x1="13" y1="7" x2="26" y2="7" stroke="${s.color}" stroke-width="3"/></svg>`;
   if (L.kind === 'point') return `<span class="layer__sw" style="display:grid;place-items:center"><i style="width:12px;height:12px;border-radius:50%;background:${s.color};box-shadow:0 0 0 2px ${s.casing ? s.casingColor : 'transparent'},0 0 0 3px rgba(0,0,0,.2)"></i></span>`;
   const col = s.colorBy === 'grade' ? GRADES.slice(0, 4).map(g => g.color) : [s.color];
   const dash = DASHES[s.dash];
@@ -380,7 +424,7 @@ function swatch(L) {
 function statusText(L) {
   if (L.status === 'loading') return '<span><i class="spin"></i> Loading…</span>';
   if (L.status === 'error') return `<span class="err">${esc(L.error)}</span>`;
-  if (L.source === 'linz') return '<span>LINZ Topo · whole country</span>';
+  if (L.source === 'linz') return '<span>LINZ · whole country, instant</span>';
   if (L.data) return `<span>${L.data.features.length.toLocaleString()} features · ${LICENCES[L.source].name}</span>`;
   return '<span>Not loaded</span>';
 }
@@ -391,7 +435,14 @@ function layerBody(L) {
   const opt = (v, cur, label = v) => `<option value="${v}" ${v === cur ? 'selected' : ''}>${label}</option>`;
   const mm = v => (v * 25.4 / 96).toFixed(2);
   let h = `<label class="row">Name <input type="text" data-k="name" value="${esc(L.name)}"></label>`;
-  if (L.kind !== 'point') {
+  if (L.kind === 'roads') {
+    h += `<div class="row">Show <div class="road-classes">${ROAD_CLASSES.slice().reverse().map(c => `<label class="check"><input type="checkbox" data-c="${c.k}" ${s.classes[c.k] ? 'checked' : ''}> ${c.label}</label>`).join('')}</div></div>
+      <div class="row">Highways <input type="color" data-s="hwyColor" value="${s.hwyColor}"></div>
+      <div class="row">Roads <input type="color" data-s="color" value="${s.color}"></div>
+      <div class="row">Gravel <div class="split"><input type="color" data-s="gravelColor" value="${s.gravelColor}"><label class="check"><input type="checkbox" data-s="gravelDash" ${s.gravelDash ? 'checked' : ''}> dashed</label></div></div>
+      <label class="row">Width <span class="split"><input type="range" data-s="width" data-num min="0.4" max="6" step="0.1" value="${s.width}"><span class="muted small" data-mm>${mm(s.width)} mm</span></span></label>
+      <div class="row">Casing <div class="split"><input type="checkbox" data-s="casing" ${s.casing ? 'checked' : ''}><input type="color" data-s="casingColor" value="${s.casingColor}"><input type="range" data-s="casingWidth" data-num min="0.25" max="3" step="0.25" value="${s.casingWidth}"></div></div>`;
+  } else if (L.kind !== 'point') {
     h += `<div class="row">Colour <div class="split"><input type="color" data-s="color" value="${s.color}">
       ${p.grades || L.source === 'file' ? `<select data-s="colorBy">${opt('single', s.colorBy, 'Single colour')}${opt('grade', s.colorBy, 'By difficulty')}</select>` : ''}</div></div>
       <label class="row">Width <span class="split"><input type="range" data-s="width" data-num min="0.5" max="8" step="0.1" value="${s.width}"><span class="muted small" data-mm>${mm(s.width)} mm</span></span></label>
@@ -403,7 +454,7 @@ function layerBody(L) {
       <label class="row">Size <input type="range" data-s="size" data-num min="2" max="16" step="0.5" value="${s.size}"></label>
       <div class="row">Outline <div class="split"><input type="checkbox" data-s="casing" ${s.casing ? 'checked' : ''}><input type="color" data-s="casingColor" value="${s.casingColor}"></div></div>`;
   }
-  if (L.kind !== 'point' && (L.source === 'osm' || L.source === 'file')) {
+  if (L.kind === 'line' && (L.source === 'osm' || L.source === 'file')) {
     h += `<label class="row">Show <select data-s="show">${opt('all', s.show || 'all', 'Everything')}${opt('bike', s.show, 'Bike-friendly only')}${opt('walk', s.show, 'Walkable only')}</select></label>
       <div class="row">Bike-friendly <div class="split"><select data-s="bike">${opt('none', s.bike || 'none', 'No highlight')}${opt('side', s.bike, 'Stripe alongside')}${opt('color', s.bike, 'Recolour trail')}</select><input type="color" data-s="bikeColor" value="${s.bikeColor || '#ffd400'}"></div></div>
       ${p.combined ? `<label class="check"><input type="checkbox" data-s="hideRoads" ${s.hideRoads ? 'checked' : ''}> Hide road sections of cycle routes</label>` : ''}`;
@@ -419,7 +470,7 @@ function layerBody(L) {
   const lic = LICENCES[L.source];
   h += `<p class="layer__src">${esc(lic.name)} · ${esc(lic.licence)}${L.loadedBbox ? ' · loaded for previous view' : ''}</p><div class="split" style="margin-top:8px">`;
   if (L.source === 'osm' || L.source === 'doc') h += `<button type="button" class="btn small" data-act="reload">Reload for this area</button>`;
-  if (L.data) h += `<button type="button" class="btn ghost small" data-act="geojson">Download GeoJSON</button>`;
+  if (L.data) h += `<button type="button" class="btn ghost small" data-act="geojson" title="${L.source === 'osm' ? 'OSM data is ODbL: if you share or sell this file it must stay ODbL and credit OpenStreetMap contributors' : 'Keep the source credit with the data'}">Download GeoJSON</button>`;
   h += '</div>';
   return h;
 }
@@ -475,6 +526,7 @@ $('#layer-list').addEventListener('input', e => {
     if (el.dataset.k === 'attribution') refreshCredits();
     save(); return;
   }
+  if (el.dataset.c) { L.style.classes[el.dataset.c] = el.checked; el.closest('.layer').querySelector('.layer__sw').outerHTML = swatch(L); syncMap(); return; }
   const k = el.dataset.s;
   if (!k) return;
   L.style[k] = el.type === 'checkbox' ? el.checked : el.dataset.num != null ? parseFloat(el.value) : el.value;
@@ -538,6 +590,9 @@ const printSetters = [
   bind('#p-show-attr', PR, 'showAttribution', { check: true, after: save }),
   bind('#p-show-crop', PR, 'showCropMarks', { check: true, after: save }),
   bind('#p-format', PR, 'format', { after: save }),
+  bind('#p-publisher', PR, 'publisher', { after: updateFinePreview }),
+  bind('#p-show-fine', PR, 'showFinePrint', { check: true, after: updateFinePreview }),
+  bind('#p-safety', PR, 'safety', { check: true, after: updateFinePreview }),
   bind('#p-world', PR, 'worldFile', { check: true, after: save }),
 ];
 function printChanged() {
@@ -577,6 +632,19 @@ $('#btn-frame').addEventListener('click', () => { state.print.frame = !state.pri
 $('#btn-panel').addEventListener('click', () => { document.body.classList.toggle('panel-hidden'); setTimeout(() => { map.resize(); updateFrame(); }, 220); });
 $('#p-credits').addEventListener('input', e => { state.print.credits = e.target.value; state.print.creditsEdited = true; save(); });
 $('#p-credits-auto').addEventListener('click', () => { state.print.creditsEdited = false; refreshCredits(); });
+
+// ---- Fine print -------------------------------------------------------------------------------
+function finePrintText() {
+  const p = state.print, img = state.imagery;
+  if (!p.showFinePrint) return '';
+  const adjusted = img.brightness || img.contrast || img.saturation || img.opacity < 1;
+  const srcs = activeSources();
+  const out = [];
+  out.push(`${p.publisher ? `Map © ${new Date().getFullYear()} ${p.publisher}. ` : ''}Compiled from the credited sources; data has been modified (cropped, re-projected, restyled${adjusted ? ', colour-adjusted' : ''}). No endorsement by any data provider is implied. Licences: CC BY 4.0 creativecommons.org/licenses/by/4.0${srcs.includes('osm') ? ' · ODbL openstreetmap.org/copyright' : ''}.`);
+  if (p.safety) out.push('Tracks, closures and access change: check DOC and local alerts before you go. Not a navigation device; use at your own risk.');
+  return out.join(' ');
+}
+function updateFinePreview() { $('#p-fine-preview').textContent = finePrintText(); save(); }
 
 // ---- Credits / licences -------------------------------------------------------------------------
 
@@ -624,6 +692,7 @@ async function buildCredits() {
 
 async function refreshCredits() {
   const text = await buildCredits();
+  if ($('#p-fine-preview')) $('#p-fine-preview').textContent = finePrintText();
   if (!state.print.creditsEdited) { state.print.credits = text; $('#p-credits').value = text; save(); }
   updateAttribution(text);
 }
@@ -641,18 +710,41 @@ function updateAttribution(text) {
 $('#btn-credits').addEventListener('click', async () => {
   const srcs = new Set(activeSources());
   const credit = await buildCredits();
+  const L = LICENCES;
+  const card = (id, body) => `<div class="lic" style="${srcs.has(id) || !L[id] ? '' : 'opacity:.65'}">${body}</div>`;
+  const head = id => `<b>${esc(L[id].name)}</b> <span class="tag">${esc(L[id].licence)}</span> ${id !== 'file' ? '<span class="ok">✓ commercial use</span>' : ''} ${srcs.has(id) ? '<span class="tag">in this map</span>' : ''}`;
   $('#credits-body').innerHTML = `
-    <p class="small">Every source in this tool allows <b>commercial use</b> (selling printed maps) as long as you credit it. The Print tab adds a credits line automatically — keep it on.</p>
-    ${Object.entries(LICENCES).map(([id, l]) => `
-      <div class="lic" style="${srcs.has(id) ? '' : 'opacity:.6'}">
-        <b>${esc(l.name)}</b> <span class="tag">${esc(l.licence)}</span> ${id !== 'file' ? '<span class="ok">✓ commercial use</span>' : ''} ${srcs.has(id) ? '<span class="tag">in use</span>' : ''}
-        <p>${esc(l.note)} ${l.url ? `<a href="${l.url}" target="_blank" rel="noopener">Licence details</a>` : ''}</p>
-      </div>`).join('')}
-    <h3>Credit line for your current map</h3>
+    <p class="small">Every data source here can be used on maps you <b>sell</b>, as long as you meet its terms. The Print tab’s <b>credits line</b> and <b>fine print</b> cover the attribution. Keep both switched on.</p>
+    ${card('linz', `${head('linz')}<ul>
+      <li>Credit LINZ, plus the council or partner named for the imagery (added for you), and name the licence: CC BY 4.0.</li>
+      <li>Say the data was modified. Cropping, restyling and colour changes all count, and the fine print says so.</li>
+      <li>Don’t suggest LINZ endorses your map, and don’t use the LINZ or Toitū Te Whenua logos.</li>
+      <li>Basemaps API: free, fair use. Use your own permanent key for a public or commercial site (Settings).</li>
+      <li>Place names come from the NZ Gazetteer. Keep official spellings and macrons.</li></ul>
+      <p><a href="https://www.linz.govt.nz/products-services/data/licensing-and-using-data/attributing-linz-data" target="_blank" rel="noopener">Attributing LINZ data</a> · <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener">CC BY 4.0</a></p>`)}
+    ${card('osm', `${head('osm')}<ul>
+      <li>A printed map is a “Produced Work”. Show “© OpenStreetMap contributors” where people will see it. Adding openstreetmap.org/copyright is recommended (in the fine print).</li>
+      <li>Selling prints doesn’t trigger share-alike. Sharing or selling the <i>data</i> does: a GeoJSON export, or the trail database in an app, must stay ODbL.</li>
+      <li>Overpass and Nominatim are free community servers. Light, interactive use only. No bulk scraping, and don’t point a busy public site at them (pre-built tiles fix this).</li></ul>
+      <p><a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OSM copyright</a> · <a href="https://osmfoundation.org/wiki/Licence/Attribution_Guidelines" target="_blank" rel="noopener">Attribution guidelines</a> · <a href="https://operations.osmfoundation.org/policies/nominatim/" target="_blank" rel="noopener">Nominatim policy</a></p>`)}
+    ${card('doc', `${head('doc')}<ul>
+      <li>Credit the Department of Conservation and CC BY 4.0. Data is supplied as-is.</li>
+      <li>Track status changes often. Check closures before printing (the safety note covers buyers).</li>
+      <li>Don’t use DOC logos or imply DOC approves your map.</li></ul>`)}
+    ${card('eox', `${head('eox')}<ul>
+      <li>Only the 2016 mosaic is offered, because it’s CC BY 4.0. Use the exact credit (added automatically).</li>
+      <li>EOX’s 2017+ mosaics are CC BY-NC-SA, so commercial use needs a paid EOX licence.</li></ul>`)}
+    ${card('file', `${head('file')}<ul>
+      <li>Upload only data you created or are licensed to sell. Strava, Trailforks, AllTrails and Google data are not.</li>
+      <li>Add a credit line for any third-party data in the layer’s settings.</li></ul>`)}
+    <h3>Credit line for this map</h3>
     <p class="small" style="background:var(--soft);padding:10px;border-radius:8px">${esc(credit)}</p>
-    <h3>Software</h3>
-    <p class="small muted">MapLibre GL JS (BSD-3), jsPDF (MIT), fonts Open Sans/Roboto/Barlow/Inter/Cormorant (SIL OFL / Apache) — all fine for commercial use. Place search by OpenStreetMap Nominatim (not used in your output).</p>
-    <p class="small muted">Not general legal advice — but this matches each licence’s published terms as of 2026.</p>`;
+    <h3>Fine print for this map</h3>
+    <p class="small" style="background:var(--soft);padding:10px;border-radius:8px">${esc(finePrintText() || '(switched off on the Print tab)')}</p>
+    <h3>Software &amp; fonts</h3>
+    <p class="small muted">MapLibre GL JS © MapLibre contributors (BSD-3-Clause) · jsPDF (MIT) · Open Sans &amp; Roboto label fonts, served by LINZ (Apache 2.0) · Barlow, Inter and Cormorant Garamond (SIL Open Font Licence 1.1). All allow commercial use, and the fonts can be embedded in images and PDFs you sell.</p>
+    <h3>Disclaimer</h3>
+    <p class="small muted">This tool, and the data it pulls in, come with no warranty of accuracy or fitness for any purpose. These notes summarise each licence as published (checked November 2026). They aren’t legal advice, and licences can change, so recheck the links before a big print run.</p>`;
   $('#dlg-credits').showModal();
 });
 
@@ -706,7 +798,8 @@ function loadState(s) {
   state = merge(clone(DEFAULTS), s);
   state.layers.forEach(l => { l.status = l.data ? 'ok' : 'empty'; l.error = null; });
   map.jumpTo({ center: state.view.center, zoom: state.view.zoom });
-  setters.forEach(x => x()); printSetters.forEach(x => x());
+  setters.forEach(x => x()); printSetters.forEach(x => x()); renderPlaceEditor();
+  $('#place-editor').hidden = !state.terrain.labels;
   $('#p-credits').value = state.print.credits;
   renderLayers(); syncMap(); renderImageryList(); printChanged(); refreshCredits();
 }
@@ -758,6 +851,7 @@ async function runExport({ preview = false } = {}) {
   const t0 = performance.now();
   try {
     if (!state.print.creditsEdited) await refreshCredits();
+    st = { ...st, print: { ...st.print, finePrint: finePrintText() } };
     const canvas = await renderPrint({
       state: st, key, topo, geo: g, signal: exportCtl.signal,
       onProgress: (msg, f) => { label.textContent = msg; bar.style.setProperty('--p', `${Math.round(f * 100)}%`); },
@@ -798,7 +892,10 @@ document.addEventListener('keydown', e => {
 // ---- Init -------------------------------------------------------------------------------------------------
 
 $('#p-credits').value = state.print.credits;
+renderPlaceEditor();
+$('#place-editor').hidden = !state.terrain.labels;
 renderLayers();
+updateFinePreview();
 printChanged();
 refreshCredits();
 window.__tm = { get state() { return state; }, syncMap, runExport, addLayer, loadLayer, setBase };

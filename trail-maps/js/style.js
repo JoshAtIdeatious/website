@@ -109,6 +109,78 @@ function pointLayers(L, srcProps) {
   return out;
 }
 
+// ---- Roads (LINZ topographic vector tiles) -------------------------------------------
+const GRAVEL = ['in', ['coalesce', ['get', 'surface'], ''], ['literal', ['metalled', 'unmetalled']]];
+export const ROAD_CLASSES = [
+  { k: 'rail', label: 'Railway', filter: ['==', ['get', 'class'], 'rail'], w: 0.7 },
+  { k: 'gravel', label: 'Gravel roads', filter: ['all', ['==', ['get', 'class'], 'secondary'], GRAVEL], w: 0.85 },
+  { k: 'local', label: 'Local roads', filter: ['all', ['==', ['get', 'class'], 'secondary'], ['!', GRAVEL]], w: 1 },
+  { k: 'main', label: 'Main roads', filter: ['==', ['get', 'class'], 'primary'], w: 1.35 },
+  { k: 'highway', label: 'State highways', filter: ['==', ['get', 'class'], 'motorway'], w: 1.75 },
+];
+
+export function roadLook(s, c) {
+  if (c.k === 'rail') return { color: '#3a3a3a', dash: [2.5, 2], width: Math.max(1, s.width * c.w), casing: false };
+  return {
+    color: c.k === 'highway' ? s.hwyColor : c.k === 'gravel' ? s.gravelColor : s.color,
+    dash: c.k === 'gravel' && s.gravelDash ? [3, 1.5] : null,
+    width: s.width * c.w, casing: s.casing,
+  };
+}
+
+function roadLayers(L) {
+  const s = L.style;
+  const id = `u-${L.id}`;
+  const base = { source: 'linz', 'source-layer': 'transportation' };
+  const on = ROAD_CLASSES.filter(c => s.classes?.[c.k]);
+  const lines = [], labels = [];
+  // All casings first, then fills, so junctions merge cleanly.
+  for (const c of on) {
+    const look = roadLook(s, c);
+    if (look.casing) lines.push({ id: `${id}-${c.k}-casing`, type: 'line', ...base, filter: c.filter,
+      layout: { 'line-cap': 'round', 'line-join': 'round' },
+      paint: { 'line-color': s.casingColor, 'line-width': look.width + s.casingWidth * 2, 'line-opacity': s.opacity } });
+  }
+  for (const c of on) {
+    const look = roadLook(s, c);
+    const paint = { 'line-color': look.color, 'line-width': look.width, 'line-opacity': s.opacity };
+    if (look.dash) paint['line-dasharray'] = look.dash;
+    lines.push({ id: `${id}-${c.k}`, type: 'line', ...base, filter: c.filter, layout: { 'line-cap': look.dash ? 'butt' : 'round', 'line-join': 'round' }, paint });
+  }
+  if (s.labels && on.length) {
+    labels.push({ id: `${id}-label`, type: 'symbol', ...base, filter: ['all', ['has', 'name'], ['any', ...on.map(c => c.filter)]],
+      layout: { 'symbol-placement': 'line', 'text-field': ['get', 'name'], 'text-font': [s.labelFont || 'Open Sans Regular'],
+        'text-size': s.labelSize, 'symbol-spacing': 400, 'text-max-angle': 30, 'text-padding': 4 },
+      paint: { 'text-color': s.labelColor, 'text-halo-color': 'rgba(255,255,255,0.9)', 'text-halo-width': 1.4, 'text-opacity': s.opacity } });
+  }
+  return { lines, labels };
+}
+
+// ---- Place labels (LINZ gazetteer names in the topographic tiles) ----------------------
+const has = (k, v) => ['all', ['has', k], ['!=', ['get', k], '0'], ...(v ? [['in', ['get', k], ['literal', v]]] : [])];
+export const PLACE_CATS = [
+  { k: 'city', label: 'Cities & large towns', filter: ['all', ['==', ['get', 'class'], 'city'], ['!', has('natural')]] },
+  { k: 'town', label: 'Towns', filter: ['==', ['get', 'class'], 'town'] },
+  { k: 'suburb', label: 'Suburbs & villages', filter: ['in', ['get', 'place'], ['literal', ['suburb', 'village', 'hamlet', 'locality']]] },
+  { k: 'water', label: 'Lakes, bays & sounds', filter: ['any', ['==', ['get', 'place'], 'lake'], has('water')] },
+  { k: 'peak', label: 'Peaks & landforms', filter: has('natural') },
+  { k: 'island', label: 'Islands', filter: ['in', ['get', 'place'], ['literal', ['island', 'archipelago']]] },
+];
+
+function placeLabels(P) {
+  return PLACE_CATS.filter(c => P.cats[c.k]?.on).map(c => {
+    const st = P.cats[c.k];
+    return {
+      id: `place-${c.k}`, type: 'symbol', source: 'linz', 'source-layer': 'place', filter: c.filter,
+      layout: {
+        'text-field': st.caps ? ['upcase', ['get', 'name']] : ['get', 'name'], 'text-font': [st.font],
+        'text-size': st.size, 'text-letter-spacing': st.caps ? 0.1 : 0.02, 'text-max-width': 8, 'text-padding': 3,
+      },
+      paint: { 'text-color': st.color, 'text-halo-color': P.halo, 'text-halo-width': P.haloWidth, 'text-halo-blur': 0.4 },
+    };
+  });
+}
+
 function brightness(b) {
   return b >= 0 ? { 'raster-brightness-min': b, 'raster-brightness-max': 1 } : { 'raster-brightness-min': 0, 'raster-brightness-max': 1 + b };
 }
@@ -161,6 +233,12 @@ export function buildStyle(state, { key, topo = null, tileScale = 0 } = {}) {
   const pointLs = [];
   for (const L of visible) {
     let src;
+    if (L.kind === 'roads') {
+      if (!sources.linz) continue;
+      const r = roadLayers(L);
+      layers.push(...r.lines); pointLs.push(...r.labels);
+      continue;
+    }
     if (L.source === 'linz') {
       if (!sources.linz) continue;
       src = { source: 'linz', 'source-layer': 'transportation', filter: PRESETS[L.preset]?.filter };
@@ -178,12 +256,7 @@ export function buildStyle(state, { key, topo = null, tileScale = 0 } = {}) {
     }
   }
 
-  if (t.labels && topo) {
-    for (const l of topo.layers.filter(l => l.id.startsWith('Place-Names'))) {
-      const layout = Object.fromEntries(Object.entries(l.layout || {}).filter(([k]) => !k.startsWith('icon')));
-      layers.push({ ...l, source: 'linz', layout: { ...layout, visibility: 'visible' } });
-    }
-  }
+  if (t.labels && state.places) layers.push(...placeLabels(state.places));
   layers.push(...pointLs);
 
   return { version: 8, glyphs: GLYPHS, sources, layers };

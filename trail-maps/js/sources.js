@@ -133,6 +133,21 @@ export const PRESETS = {
     filter: ['all', ['==', 'class', 'track'], ['==', 'track_use', 'vehicle']],
     style: LINE('#ffffff', { dash: 'dot', width: 1.4, casing: false }),
   },
+  'linz-roads': {
+    group: 'Roads', source: 'linz', kind: 'roads', name: 'Roads',
+    desc: 'LINZ roads: highways, main, local, gravel, rail — whole country, no loading',
+    style: {
+      color: '#ffffff', hwyColor: '#f2b134', gravelColor: '#e3cf9c', gravelDash: true, width: 1.6, opacity: 0.95,
+      casing: true, casingColor: '#2b2b2b', casingWidth: 0.7, labels: false, labelSize: 10, labelColor: '#1b1b1b',
+      classes: { highway: true, main: true, local: true, gravel: true, rail: false },
+    },
+  },
+  'osm-places': {
+    group: 'Roads', source: 'osm', kind: 'point', name: 'Villages & localities',
+    desc: 'Small settlements and named localities from OSM (LINZ only labels bigger places)',
+    query: `(node["place"~"^(village|hamlet|locality|isolated_dwelling)$"]["name"](${B}););out tags;`,
+    style: POINT('#ffffff', { size: 2.5, casing: true, casingColor: '#333333', labelSize: 11, labelColor: '#1b1b1b' }),
+  },
   file: {
     group: 'Upload', source: 'file', kind: 'line', name: 'Uploaded file',
     desc: 'GPX, KML or GeoJSON', style: LINE('#a020f0'),

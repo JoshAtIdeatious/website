@@ -1,5 +1,5 @@
 // Print geometry, high-resolution tiled rendering, map furniture and file encoding.
-import { buildStyle, attachIcons, DASHES } from './style.js';
+import { buildStyle, attachIcons, DASHES, ROAD_CLASSES, roadLook } from './style.js';
 import { GRADES } from './sources.js';
 
 const EARTH = 40075016.686;          // equatorial circumference (m)
@@ -242,11 +242,25 @@ export async function drawFurniture(ctx, state, geo) {
 
   // Bottom stack (left): legend above scale bar.
   let bottom = Y + th - margin;
-  const attrSize = unit * 1.25;
-  if (p.showAttribution && p.credits) {
+  const attrSize = unit * 1.25, fineSize = unit * 1.02;
+  // Credits (+ fine print) block, bottom right. Laid out once, used for spacing and drawing.
+  const credit = (() => {
+    const text = p.showAttribution ? (p.credits || '') : '';
+    const fine = p.finePrint || '';
+    if (!text && !fine) return null;
+    const maxW = Math.min(tw - margin * 2 - unit * 2, mm(260));
     ctx.font = `500 ${attrSize}px "Barlow", sans-serif`;
-    bottom -= wrap(ctx, p.credits, tw - margin * 2 - unit * 2).length * attrSize * 1.35 + attrSize * 0.6 + unit;
-  }
+    const cl = text ? wrap(ctx, text, maxW) : [];
+    const cw = cl.map(l => ctx.measureText(l).width);
+    ctx.font = `400 ${fineSize}px "Barlow", sans-serif`;
+    const fl = fine ? wrap(ctx, fine, maxW) : [];
+    const fw = fl.map(l => ctx.measureText(l).width);
+    const lh = attrSize * 1.35, flh = fineSize * 1.35;
+    const w = Math.max(...cw, ...fw) + unit * 2;
+    const h = cl.length * lh + fl.length * flh + (cl.length && fl.length ? unit * 0.4 : 0) + attrSize * 0.6;
+    return { cl, fl, lh, flh, w, h };
+  })();
+  if (credit) bottom -= credit.h + unit;
 
   if (p.showScale) {
     const mPerPx = (geo.scale * MM_PER_IN / 1000) / p.dpi;
@@ -276,6 +290,12 @@ export async function drawFurniture(ctx, state, geo) {
   if (p.showLegend) {
     const items = [];
     for (const L of state.layers.filter(l => l.visible)) {
+      if (L.kind === 'roads') {
+        const on = ROAD_CLASSES.slice().reverse().filter(c => L.style.classes?.[c.k]);
+        if (on.length) items.push({ head: L.name });
+        for (const c of on) items.push({ label: c.label, L, road: roadLook(L.style, c), indent: true });
+        continue;
+      }
       if (L.style.colorBy === 'grade' && L.kind !== 'point') {
         items.push({ head: L.name });
         for (const g of GRADES.filter(g => g.id !== 'other')) items.push({ label: g.label, L, color: g.color, indent: true });
@@ -297,7 +317,19 @@ export async function drawFurniture(ctx, state, geo) {
         const s = it.L.style;
         const sx = bx + padX + (it.indent ? unit * 1.5 : 0);
         const wpx = mm((s.width || 2) * MM_PER_IN / CSS_DPI);
-        if (it.L.kind === 'point') {
+        const px = v => mm(v * MM_PER_IN / CSS_DPI);
+        if (it.road) {
+          const r = it.road;
+          ctx.lineCap = 'butt';
+          if (r.casing) {
+            ctx.setLineDash([]); ctx.strokeStyle = s.casingColor; ctx.lineWidth = px(r.width + s.casingWidth * 2);
+            ctx.beginPath(); ctx.moveTo(sx, cy); ctx.lineTo(sx + sw, cy); ctx.stroke();
+          }
+          ctx.setLineDash(r.dash ? r.dash.map(v => v * px(r.width)) : []);
+          ctx.strokeStyle = r.color; ctx.lineWidth = px(r.width);
+          ctx.beginPath(); ctx.moveTo(sx, cy); ctx.lineTo(sx + sw, cy); ctx.stroke();
+          ctx.setLineDash([]);
+        } else if (it.L.kind === 'point') {
           const r = mm((s.size || 5) * MM_PER_IN / CSS_DPI) * (s.icon && s.icon !== 'circle' ? 0.9 : 1);
           ctx.beginPath(); ctx.arc(sx + sw / 2, cy, r, 0, Math.PI * 2);
           ctx.fillStyle = it.color; ctx.fill();
@@ -340,18 +372,17 @@ export async function drawFurniture(ctx, state, geo) {
     ctx.fillText('N', cx, ny + s * 0.08); ctx.textAlign = 'left';
   }
 
-  if (p.showAttribution && p.credits) {
-    ctx.font = `500 ${attrSize}px "Barlow", sans-serif`;
-    ctx.textBaseline = 'middle';
-    const maxW = tw - margin * 2 - unit * 2;
-    const lines = wrap(ctx, p.credits, maxW);
-    const lh = attrSize * 1.35;
-    const w = Math.max(...lines.map(l => ctx.measureText(l).width)) + unit * 2;
-    const h = lines.length * lh + attrSize * 0.6;
+  if (credit) {
+    const { cl, fl, lh, flh, w, h } = credit;
     const bx = X + tw - margin - w, by = Y + th - margin - h;
     ctx.fillStyle = panel; roundRect(ctx, bx, by, w, h, unit * 0.4); ctx.fill();
-    ctx.fillStyle = '#333';
-    lines.forEach((l, i) => ctx.fillText(l, bx + unit, by + attrSize * 0.3 + lh * (i + 0.5)));
+    ctx.textBaseline = 'middle';
+    let y = by + attrSize * 0.3;
+    ctx.fillStyle = '#333'; ctx.font = `500 ${attrSize}px "Barlow", sans-serif`;
+    for (const l of cl) { ctx.fillText(l, bx + unit, y + lh / 2); y += lh; }
+    if (cl.length && fl.length) y += unit * 0.4;
+    ctx.fillStyle = '#5a5a5a'; ctx.font = `400 ${fineSize}px "Barlow", sans-serif`;
+    for (const l of fl) { ctx.fillText(l, bx + unit, y + flh / 2); y += flh; }
   }
 
   if (p.showCropMarks && geo.paper.bleed > 0) {
