@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Trail Map Studio</title>
+  <meta name="description" content="Make print-ready trail maps from LINZ aerial imagery, OpenStreetMap and DOC tracks.">
+  <link rel="icon" type="image/svg+xml" href="../favicon.svg">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600;700&family=Barlow+Condensed:wght@600;700&family=Cormorant+Garamond:wght@600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css">
+  <link rel="stylesheet" href="css/app.css">
+  <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+</head>
+<body>
+  <aside id="panel">
+    <header class="brand">
+      <div class="brand__mark" aria-hidden="true">
+        <svg viewBox="0 0 24 24"><path d="M3 20 9 8l4 7 3-4 5 9z" fill="currentColor"/><path d="M5 17c3-1 5 1 8 0s4-2 6-1" stroke="#fff" stroke-width="1.4" fill="none" stroke-dasharray="2 1.6"/></svg>
+      </div>
+      <div>
+        <h1>Trail Map Studio</h1>
+        <p>Aerials + trails → print</p>
+      </div>
+      <button class="icon-btn" id="btn-project" title="Save / open project" aria-label="Project">
+        <svg viewBox="0 0 24 24"><path d="M4 4h12l4 4v12H4z" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M8 4v5h7V4M8 20v-6h8v6" fill="none" stroke="currentColor" stroke-width="1.8"/></svg>
+      </button>
+    </header>
+
+    <form id="search" class="search" autocomplete="off">
+      <input id="search-q" type="search" placeholder="Search a place (e.g. Ben Lomond)" aria-label="Search place">
+      <ul id="search-results" hidden></ul>
+    </form>
+
+    <nav class="tabs" role="tablist">
+      <button role="tab" data-tab="imagery" aria-selected="true">Imagery</button>
+      <button role="tab" data-tab="layers">Trails <span id="layer-count" class="pill" hidden></span></button>
+      <button role="tab" data-tab="print">Print</button>
+    </nav>
+
+    <section class="tab" id="tab-imagery">
+      <div class="current-base">
+        <div class="eyebrow">Showing</div>
+        <div id="base-title" class="base-title">Latest aerial imagery</div>
+        <div id="base-meta" class="muted small"></div>
+        <div class="stepper">
+          <button class="btn ghost" id="year-prev" title="Older imagery ( [ )">◀ Older</button>
+          <span id="year-pos" class="muted small"></span>
+          <button class="btn ghost" id="year-next" title="Newer imagery ( ] )">Newer ▶</button>
+        </div>
+      </div>
+
+      <div class="group">
+        <div class="group__head">
+          <h2>Imagery for this area</h2>
+          <label class="check small"><input type="checkbox" id="show-scanned" checked> Historic scans</label>
+        </div>
+        <div id="year-chips" class="chips"></div>
+        <ul id="imagery-list" class="imagery-list"><li class="muted small">Loading LINZ catalogue…</li></ul>
+      </div>
+
+      <div class="group">
+        <h2>Adjust imagery</h2>
+        <label class="row">Opacity <input type="range" id="img-opacity" min="0" max="1" step="0.05"></label>
+        <label class="row">Brightness <input type="range" id="img-brightness" min="-0.5" max="0.5" step="0.02"></label>
+        <label class="row">Contrast <input type="range" id="img-contrast" min="-0.6" max="0.6" step="0.02"></label>
+        <label class="row">Saturation <input type="range" id="img-saturation" min="-1" max="0.6" step="0.05"></label>
+        <label class="check"><input type="checkbox" id="img-fill"> Fill gaps with latest aerial</label>
+        <button class="btn ghost small" id="img-reset" type="button">Reset adjustments</button>
+      </div>
+
+      <div class="group">
+        <h2>Terrain &amp; labels</h2>
+        <label class="check"><input type="checkbox" id="t-hillshade"> Hillshade</label>
+        <label class="row indent">Strength <input type="range" id="t-hillshade-strength" min="0.05" max="1" step="0.05"></label>
+        <label class="check"><input type="checkbox" id="t-contours"> Contours (LINZ 20 m)</label>
+        <div class="row indent">Colour <input type="color" id="t-contour-color"> <input type="range" id="t-contour-opacity" min="0.1" max="1" step="0.05" aria-label="Contour opacity"></div>
+        <label class="check"><input type="checkbox" id="t-labels"> Place &amp; peak names (LINZ)</label>
+      </div>
+    </section>
+
+    <section class="tab" id="tab-layers" hidden>
+      <div class="group">
+        <div class="group__head">
+          <h2>Trail layers</h2>
+          <button class="btn primary small" id="btn-add-layer" type="button">+ Add layer</button>
+        </div>
+        <p class="muted small" id="layers-empty">Add trails from OpenStreetMap, DOC or LINZ — or upload your own GPX. Top of the list draws on top.</p>
+        <ul id="layer-list" class="layer-list"></ul>
+      </div>
+      <div class="group">
+        <h2>Loading trails</h2>
+        <p class="muted small">OSM and DOC layers load for the area you’re looking at (or the print frame, if bigger). Move the map, then hit <b>Reload</b> on a layer — or:</p>
+        <button class="btn small" id="btn-reload-all" type="button">Reload all for this area</button>
+      </div>
+    </section>
+
+    <section class="tab" id="tab-print" hidden>
+      <div class="group">
+        <h2>Sheet</h2>
+        <div class="grid2">
+          <label>Paper
+            <select id="p-paper">
+              <option>A5</option><option>A4</option><option>A3</option><option>A2</option><option>A1</option><option>A0</option>
+              <option>Letter</option><option>Tabloid</option><option>DL fold</option><option value="custom">Custom…</option>
+            </select>
+          </label>
+          <label>Orientation
+            <select id="p-orientation"><option value="portrait">Portrait</option><option value="landscape">Landscape</option></select>
+          </label>
+        </div>
+        <div class="grid2" id="p-custom" hidden>
+          <label>Width (mm) <input type="number" id="p-cw" min="50" max="2000"></label>
+          <label>Height (mm) <input type="number" id="p-ch" min="50" max="2000"></label>
+        </div>
+        <div class="grid2">
+          <label>Resolution
+            <select id="p-dpi"><option value="150">150 dpi (draft)</option><option value="200">200 dpi</option><option value="300">300 dpi (print)</option><option value="400">400 dpi</option><option value="600">600 dpi</option></select>
+          </label>
+          <label>Bleed (mm) <input type="number" id="p-bleed" min="0" max="10" step="0.5"></label>
+        </div>
+      </div>
+
+      <div class="group">
+        <h2>Scale</h2>
+        <div class="seg" role="radiogroup">
+          <label><input type="radio" name="scale-mode" value="fit"> Fit to screen</label>
+          <label><input type="radio" name="scale-mode" value="fixed"> Fixed scale</label>
+        </div>
+        <label class="row" id="p-scale-row">1 : <input type="number" id="p-scale" min="500" max="2000000" step="500"></label>
+        <p class="muted small" id="p-scale-hint"></p>
+        <button class="btn ghost small" id="p-lock" type="button">Lock current scale</button>
+      </div>
+
+      <div class="group">
+        <h2>On the map</h2>
+        <label class="stack">Title <input type="text" id="p-title" placeholder="e.g. Queenstown Trails"></label>
+        <label class="stack">Subtitle <input type="text" id="p-subtitle" placeholder="e.g. Mountain biking · 2024 aerial"></label>
+        <label class="stack">Title font
+          <select id="p-font"><option>Barlow Condensed</option><option>Cormorant Garamond</option><option>Inter</option></select>
+        </label>
+        <div class="checks">
+          <label class="check"><input type="checkbox" id="p-show-title"> Title</label>
+          <label class="check"><input type="checkbox" id="p-show-legend"> Legend</label>
+          <label class="check"><input type="checkbox" id="p-show-scale"> Scale bar</label>
+          <label class="check"><input type="checkbox" id="p-show-north"> North arrow</label>
+          <label class="check"><input type="checkbox" id="p-show-attr"> Credits (required)</label>
+          <label class="check"><input type="checkbox" id="p-show-crop"> Crop marks</label>
+        </div>
+        <label class="stack">Credits line
+          <textarea id="p-credits" rows="3"></textarea>
+        </label>
+        <button class="btn ghost small" id="p-credits-auto" type="button">Rebuild credits from layers</button>
+      </div>
+
+      <div class="group">
+        <h2>Export</h2>
+        <div class="grid2">
+          <label>Format
+            <select id="p-format"><option value="png">PNG (lossless)</option><option value="jpg">JPEG (smaller)</option><option value="pdf">PDF (for printers)</option></select>
+          </label>
+          <label class="check tight"><input type="checkbox" id="p-world"> + world file (QGIS)</label>
+        </div>
+        <div id="p-summary" class="summary"></div>
+        <button class="btn primary wide" id="btn-export" type="button">Export map</button>
+        <button class="btn ghost wide" id="btn-preview" type="button">Quick preview (low res)</button>
+        <div id="export-progress" class="progress" hidden><div class="progress__bar"></div><span></span><button class="btn ghost small" id="btn-cancel" type="button">Cancel</button></div>
+      </div>
+    </section>
+
+    <footer class="foot">
+      <button class="link" id="btn-credits" type="button">Licences &amp; credits</button>
+      <button class="link" id="btn-settings" type="button">Settings</button>
+    </footer>
+  </aside>
+
+  <main id="map-wrap">
+    <div id="map"></div>
+    <svg id="shade" hidden><path fill-rule="evenodd"/></svg>
+    <div id="frame" hidden><div class="frame__bleed"></div><div class="frame__label"></div></div>
+    <div class="map-tools">
+      <button class="tool" id="btn-frame" title="Show print frame (F)" aria-pressed="true">
+        <svg viewBox="0 0 24 24"><path d="M4 8V4h4M16 4h4v4M20 16v4h-4M8 20H4v-4" fill="none" stroke="currentColor" stroke-width="2"/></svg>
+      </button>
+      <button class="tool" id="btn-panel" title="Hide sidebar" aria-label="Toggle sidebar">
+        <svg viewBox="0 0 24 24"><path d="M4 5h16v14H4zM9 5v14" fill="none" stroke="currentColor" stroke-width="1.8"/></svg>
+      </button>
+    </div>
+    <div id="toast" role="status" hidden></div>
+  </main>
+
+  <dialog id="dlg-add" class="dlg">
+    <form method="dialog">
+      <h2>Add a layer</h2>
+      <div id="preset-grid"></div>
+      <label class="upload">
+        <input type="file" id="file-input" accept=".gpx,.kml,.geojson,.json" multiple>
+        <span><b>Upload GPX / KML / GeoJSON</b><br><span class="muted small">Your own recordings or data you hold rights to</span></span>
+      </label>
+      <div class="dlg__foot"><button class="btn" value="cancel">Close</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="dlg-credits" class="dlg">
+    <form method="dialog">
+      <h2>Licences &amp; commercial use</h2>
+      <div id="credits-body"></div>
+      <div class="dlg__foot"><button class="btn" value="cancel">Close</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="dlg-settings" class="dlg">
+    <form method="dialog">
+      <h2>Settings</h2>
+      <label class="stack">LINZ Basemaps API key
+        <input type="text" id="s-key" placeholder="Leave blank to use a temporary developer key" spellcheck="false">
+      </label>
+      <p class="muted small">A temporary key is made automatically (like basemaps.linz.govt.nz does). For a site you sell from, ask LINZ for a free permanent key: <a href="https://www.linz.govt.nz/products-services/data/types-linz-data/basemaps" target="_blank" rel="noopener">LINZ Basemaps</a>.</p>
+      <label class="stack">Trail label font
+        <select id="s-font"></select>
+      </label>
+      <div class="dlg__foot">
+        <button class="btn" value="cancel">Cancel</button>
+        <button class="btn primary" value="save" id="s-save">Save</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="dlg-project" class="dlg">
+    <form method="dialog">
+      <h2>Project</h2>
+      <p class="muted small">Projects save your view, imagery, styles and loaded trail data in one file.</p>
+      <div class="stack-btns">
+        <button class="btn primary" type="button" id="proj-save">Save project file</button>
+        <label class="btn"><input type="file" id="proj-open" accept=".json,.tmap" hidden>Open project file</label>
+        <button class="btn ghost" type="button" id="proj-new">Start fresh</button>
+      </div>
+      <div class="dlg__foot"><button class="btn" value="cancel">Close</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="dlg-preview" class="dlg dlg--wide">
+    <form method="dialog">
+      <img id="preview-img" alt="Export preview">
+      <div class="dlg__foot"><button class="btn" value="cancel">Close</button></div>
+    </form>
+  </dialog>
+
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>
