@@ -30,6 +30,7 @@ jobs:
         run: sudo apt-get update -q && sudo apt-get install -y -q osmium-tool tippecanoe
 
       - name: Get NZ OpenStreetMap data (Geofabrik → OSM France → Overpass tiles)
+        timeout-minutes: 100
         run: bash trail-maps/tools/fetch-osm.sh nz.osm.pbf
 
       - name: Filter to trails, routes and outdoor points
