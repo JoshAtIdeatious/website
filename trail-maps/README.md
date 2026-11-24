@@ -26,7 +26,7 @@ Style options: show everything / bike-friendly only / walkable only. Bike-friend
 
 ## Pre-built NZ trail data (instant loading)
 
-`.github/workflows/trail-data.yml` runs weekly, or on demand from the Actions tab. It downloads the Geofabrik NZ extract, filters it to trails, routes, huts, peaks and small places, then classifies each feature with the same code the app uses (`tools/build-data.mjs` imports `js/sources.js`). It also adds DOC tracks and huts and packs everything into one PMTiles file. The output is force-pushed to the `trail-data` branch as a single commit, so the repo doesn't keep growing. The app loads it from raw.githubusercontent.com with HTTP range requests.
+`.github/workflows/trail-data.yml` runs twice a week, or on demand from the Actions tab. It downloads the NZ OpenStreetMap extract (Geofabrik, or the OSM France mirror, with retries), filters it to trails, routes, huts, peaks and small places, then classifies each feature with the same code the app uses (`tools/build-data.mjs` imports `js/sources.js`). It also adds DOC tracks and huts and packs everything into one PMTiles file. The output is force-pushed to the `trail-data` branch as a single commit, so the repo doesn't keep growing. The app loads it from raw.githubusercontent.com with HTTP range requests.
 
 When the data exists, new OSM and DOC layers default to **Pre-built NZ (instant)**. Any layer can be switched to **Live** to pull the latest edits for the current area from Overpass. The data branch carries its own ODbL notice.
 

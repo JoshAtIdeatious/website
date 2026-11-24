@@ -5,7 +5,8 @@ name: Build NZ trail data
 # branch (one commit, so the repo doesn't grow) and served from raw.githubusercontent.com.
 on:
   schedule:
-    - cron: '17 14 * * 0'   # Sundays 14:17 UTC = Monday early morning NZ
+    - cron: '17 14 * * 0'   # Sunday 14:17 UTC = Monday early morning NZ
+    - cron: '17 14 * * 3'   # Wednesday too, so a failed download catches up mid-week
   workflow_dispatch:
 
 permissions:
@@ -29,8 +30,8 @@ jobs:
       - name: Install osmium and tippecanoe
         run: sudo apt-get update -q && sudo apt-get install -y -q osmium-tool tippecanoe
 
-      - name: Get NZ OpenStreetMap data (Geofabrik → OSM France → Overpass tiles)
-        timeout-minutes: 100
+      - name: Get NZ OpenStreetMap extract (Geofabrik / OSM France, with retries)
+        timeout-minutes: 45
         run: bash trail-maps/tools/fetch-osm.sh nz.osm.pbf
 
       - name: Filter to trails, routes and outdoor points

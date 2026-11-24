@@ -1,46 +1,35 @@
 #!/usr/bin/env bash
-# Gets NZ OpenStreetMap data as nz.osm.pbf. Tries full extracts first, then
-# falls back to fetching just the features we need from Overpass in tiles.
+# Gets the NZ OpenStreetMap extract as nz.osm.pbf.
+# Geofabrik sometimes refuses connections from GitHub's runners, so we retry both
+# extract mirrors for up to ~30 minutes. If they all fail, the build fails and the
+# site keeps last week's published data (the twice-weekly schedule catches up).
+# (Querying all of NZ via the shared Overpass servers takes hours and isn't fair use.)
 set -uo pipefail
 OUT=${1:-nz.osm.pbf}
-# Every request is time-boxed: abort if a transfer stalls (<50 KB/s for 60 s) or runs too long,
-# so one slow server can't hang the whole build.
-CURL=(curl -L --fail --retry 3 --retry-all-errors --retry-delay 15 --connect-timeout 30
-      --speed-limit 50000 --speed-time 60 -A "trail-map-studio-data-build/1.0")
-EXTRACT_MAX=(--max-time 1200)     # ~400 MB extract
-QUERY_MAX=(--max-time 700)        # one Overpass tile (server timeout is 600 s)
+UA="trail-map-studio-data-build/1.0"
+# Abort a transfer that stalls (<50 KB/s for 60 s) or runs past 20 minutes.
+CURL=(curl -L --fail --connect-timeout 30 --speed-limit 50000 --speed-time 60 --max-time 1200 -A "$UA")
 
-try_extract() {
-  echo "::group::Trying $1"
-  if "${CURL[@]}" "${EXTRACT_MAX[@]}" -o "$OUT" "$1" && osmium fileinfo "$OUT" >/dev/null; then echo "::endgroup::"; return 0; fi
-  echo "::endgroup::"; rm -f "$OUT"; return 1
+fr_url() {
+  local listing
+  listing=$(curl -sL --fail --connect-timeout 30 --max-time 60 -A "$UA" https://download.openstreetmap.fr/extracts/oceania/) || { echo "  (OSM France listing unreachable)" >&2; return 1; }
+  local f
+  f=$(grep -oE 'href="new[-_]zealand[^"]*\.osm\.pbf"' <<<"$listing" | grep -v latest -m1 | sed 's/href="//;s/"$//')
+  [ -z "$f" ] && f=$(grep -oE 'href="new[-_]zealand[^"]*\.osm\.pbf"' <<<"$listing" | head -1 | sed 's/href="//;s/"$//')
+  [ -n "$f" ] && echo "https://download.openstreetmap.fr/extracts/oceania/$f"
 }
 
-try_extract https://download.geofabrik.de/australia-oceania/new-zealand-latest.osm.pbf && exit 0
-
-# OSM France mirror: read the directory listing rather than guessing the file name.
-listing=$("${CURL[@]}" --max-time 60 -s https://download.openstreetmap.fr/extracts/oceania/ || true)
-fr=$(grep -oE 'href="new[-_]zealand[^"]*\.osm\.pbf"' <<<"$listing" | head -1 | sed 's/href="//;s/"$//')
-[ -n "$fr" ] && try_extract "https://download.openstreetmap.fr/extracts/oceania/$fr" && exit 0
-
-echo "Extract mirrors unavailable; fetching from Overpass in tiles."
-mkdir -p tiles
-i=0
-for lat in -48 -46 -44 -42 -40 -38 -36; do
-  for lon in 166 168 170 172 174 176 178; do
-    s=$lat; n=$((lat + 2)); w=$lon; e=$((lon + 2)); b="$s,$w,$n,$e"
-    q="[out:xml][timeout:600];(way[\"highway\"~\"^(path|footway|bridleway|cycleway|steps|track)$\"]($b);rel[\"route\"~\"^(mtb|bicycle|hiking|foot|walking)$\"]($b);nwr[\"tourism\"~\"^(alpine_hut|wilderness_hut)$\"]($b);nwr[\"amenity\"=\"shelter\"]($b);node[\"natural\"~\"^(peak|volcano)$\"]($b);node[\"place\"~\"^(village|hamlet|locality|isolated_dwelling)$\"][\"name\"]($b););(._;>;);out body;"
-    ok=0
-    for ep in https://overpass-api.de/api/interpreter https://overpass.private.coffee/api/interpreter https://overpass.kumi.systems/api/interpreter; do
-      # Overpass can be silent while it computes, so no stall check here: only the overall time cap.
-      if curl -L --fail --retry 2 --retry-delay 15 --connect-timeout 30 "${QUERY_MAX[@]}" -A "trail-map-studio-data-build/1.0" -s -X POST --data-urlencode "data=$q" -o "tiles/t$i.osm" "$ep" && grep -q '<osm' "tiles/t$i.osm" && ! grep -q 'runtime error' "tiles/t$i.osm"; then ok=1; break; fi
-      sleep 20
-    done
-    [ $ok = 1 ] || { echo "Tile $b failed on every Overpass server"; exit 1; }
-    osmium sort "tiles/t$i.osm" -o "tiles/t$i.osm.pbf" -O
-    echo "tile $b: $(osmium fileinfo -e -g data.count.ways "tiles/t$i.osm.pbf") ways"
-    i=$((i + 1))
-    sleep 5   # be polite to the shared servers
+for attempt in 1 2 3 4 5 6; do
+  for url in https://download.geofabrik.de/australia-oceania/new-zealand-latest.osm.pbf "$(fr_url)"; do
+    [ -z "$url" ] && continue
+    echo "Attempt $attempt: $url"
+    if "${CURL[@]}" -o "$OUT" "$url" && osmium fileinfo "$OUT" >/dev/null 2>&1; then
+      osmium fileinfo "$OUT" | grep -E 'Size|Timestamp|osmosis_replication_timestamp' || true
+      exit 0
+    fi
+    rm -f "$OUT"
   done
+  [ $attempt -lt 6 ] && { echo "Both sources failed; waiting 5 minutes"; sleep 300; }
 done
-osmium merge tiles/*.osm.pbf -o "$OUT" -O && osmium fileinfo "$OUT" | head -20
+echo "Could not download the NZ extract; keeping the previously published data."
+exit 1
