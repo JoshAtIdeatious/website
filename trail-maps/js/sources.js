@@ -59,41 +59,48 @@ const POINT = (color, extra = {}) => ({
 const B = '{{bbox}}';
 export const PRESETS = {
   'osm-all': {
+    tiles: { layer: 'trails' },
     group: 'OpenStreetMap', source: 'osm', kind: 'line', name: 'All trails (combined)',
     desc: 'Paths, tracks, cycleways & route relations merged — each trail once, tagged bike/walk', grades: true, combined: true,
     query: `(way["highway"~"^(path|footway|bridleway|cycleway|steps|track)$"]["access"!~"^(private|no)$"](${B});rel["route"~"^(mtb|bicycle|hiking|foot|walking)$"](${B});way(r)(${B});)->.a;way.a;out tags geom;rel.a;out body;`,
     style: LINE('#ff4d2e', { bike: 'side', width: 2.2 }),
   },
   'osm-hiking': {
+    tiles: { layer: 'trails', filter: ['in', ['get', 'highway'], ['literal', ['path', 'footway', 'bridleway', 'steps']]] },
     group: 'OpenStreetMap', source: 'osm', kind: 'line', name: 'Walking & tramping tracks',
     desc: 'Paths, footways and bridleways', grades: true,
     query: `(way["highway"~"^(path|footway|bridleway|steps)$"]["access"!~"^(private|no)$"](${B}););out tags geom;`,
     style: LINE('#ff4d2e', { dash: 'dash' }),
   },
   'osm-mtb': {
+    tiles: { layer: 'trails', filter: ['any', ['has', 'mtb:scale'], ['has', 'mtb:scale:imba'], ['all', ['in', ['get', 'highway'], ['literal', ['path', 'track', 'bridleway']]], ['==', ['get', 'bicycle'], 'designated']], ['in', 'mtb', ['coalesce', ['get', '_rtypes'], '']]] },
     group: 'OpenStreetMap', source: 'osm', kind: 'line', name: 'Mountain bike trails',
     desc: 'Anything with an MTB grade, designated bike paths and MTB routes', grades: true,
     query: `(way["mtb:scale"](${B});way["mtb:scale:imba"](${B});way["highway"~"^(path|track|bridleway)$"]["bicycle"="designated"](${B}););out tags geom;rel["route"="mtb"](${B});way(r)(${B});out tags geom;`,
     style: LINE('#ffd400', { colorBy: 'grade', width: 2.6 }),
   },
   'osm-cycle': {
+    tiles: { layer: 'trails', filter: ['any', ['==', ['get', 'highway'], 'cycleway'], ['in', 'bicycle', ['coalesce', ['get', '_rtypes'], '']]] },
     group: 'OpenStreetMap', source: 'osm', kind: 'line', name: 'Cycleways & cycle trails',
     desc: 'Cycleways plus cycle routes (incl. NZ Cycle Trail Great Rides)',
     query: `(way["highway"="cycleway"](${B}););out tags geom;rel["route"="bicycle"](${B});way(r)(${B});out tags geom;`,
     style: LINE('#00c2d1', { width: 2.6 }),
   },
   'osm-4wd': {
+    tiles: { layer: 'trails', filter: ['==', ['get', 'highway'], 'track'] },
     group: 'OpenStreetMap', source: 'osm', kind: 'line', name: 'Farm & 4WD tracks',
     desc: 'highway=track', query: `(way["highway"="track"](${B}););out tags geom;`,
     style: LINE('#f5f5f5', { width: 1.6, dash: 'dot', casing: false }),
   },
   'osm-huts': {
+    tiles: { layer: 'pois', filter: ['in', ['get', 'poi'], ['literal', ['hut', 'shelter']]] },
     group: 'OpenStreetMap', source: 'osm', kind: 'point', name: 'Huts & shelters',
     desc: 'Alpine/wilderness huts and shelters',
     query: `(nwr["tourism"~"^(alpine_hut|wilderness_hut)$"](${B});nwr["amenity"="shelter"](${B}););out tags center;`,
     style: POINT('#b5651d', { icon: 'hut' }),
   },
   'osm-peaks': {
+    tiles: { layer: 'pois', filter: ['==', ['get', 'poi'], 'peak'] },
     group: 'OpenStreetMap', source: 'osm', kind: 'point', name: 'Named peaks',
     desc: 'natural=peak with names and heights',
     query: `(node["natural"~"^(peak|volcano)$"]["name"](${B}););out tags;`,
@@ -106,11 +113,13 @@ export const PRESETS = {
     style: LINE('#ff00aa'),
   },
   'doc-tracks': {
+    tiles: { layer: 'doc_tracks' },
     group: 'Department of Conservation', source: 'doc', kind: 'line', name: 'DOC tracks',
     desc: 'Official DOC walking/tramping/MTB tracks', grades: true,
     service: 'DOC_Tracks_Open_Data', style: LINE('#ff8a00', { dash: 'dash' }),
   },
   'doc-huts': {
+    tiles: { layer: 'doc_huts' },
     group: 'Department of Conservation', source: 'doc', kind: 'point', name: 'DOC huts',
     desc: 'Huts, bivvies and campsites managed by DOC', service: 'DOC_Huts_Open_Data',
     style: POINT('#d9480f', { icon: 'hut' }),
@@ -143,6 +152,7 @@ export const PRESETS = {
     },
   },
   'osm-places': {
+    tiles: { layer: 'pois', filter: ['==', ['get', 'poi'], 'place'] },
     group: 'Roads', source: 'osm', kind: 'point', name: 'Villages & localities',
     desc: 'Small settlements and named localities from OSM (LINZ only labels bigger places)',
     query: `(node["place"~"^(village|hamlet|locality|isolated_dwelling)$"]["name"](${B}););out tags;`,
@@ -156,7 +166,7 @@ export const PRESETS = {
 
 // ---- Grading -----------------------------------------------------------------
 
-function osmGrade(t) {
+export function osmGrade(t) {
   const imba = t['mtb:scale:imba'];
   if (imba != null && imba !== '') {
     const n = parseInt(imba, 10);
@@ -177,7 +187,7 @@ function osmGrade(t) {
   return 'other';
 }
 
-function docGrade(p) {
+export function docGrade(p) {
   const c = (p.WEB_CATEGORY_TRACK || p.WEB_MTB_CATEGORY || '').toLowerCase();
   if (!c) return 'other';
   if (c.includes('easy access') || c.includes('short walk') || c.includes('easiest')) return 'easy';
@@ -199,7 +209,7 @@ const YES = /^(yes|designated|permissive|official)$/;
 const TRAIL = /^(path|footway|bridleway|cycleway|steps|track)$/;
 
 // Work out what a way is good for, from its own tags plus any route relations it's in.
-function classify(t, routes) {
+export function classify(t, routes) {
   const rt = routes.map(r => r.route);
   const bikeRoute = rt.some(r => r === 'mtb' || r === 'bicycle');
   const walkRoute = rt.some(r => r === 'hiking' || r === 'foot' || r === 'walking');
@@ -238,7 +248,10 @@ export function osmToGeoJSON(json) {
     const tags = el.tags || {};
     const routes = el.type === 'way' ? (routesOf.get(el.id) || []) : [];
     const props = { ...tags, _id: key, _grade: osmGrade(tags), ...classify(tags, routes) };
-    if (routes.length) props._routes = [...new Set(routes.map(r => r.name).filter(Boolean))].join(', ');
+    if (routes.length) {
+      props._routes = [...new Set(routes.map(r => r.name).filter(Boolean))].join(', ');
+      props._rtypes = [...new Set(routes.map(r => r.route))].join(',');
+    }
     if (!props.name && props._routes) props.name = props._routes;
     if (tags.name && tags.ele) props.name_ele = `${tags.name} ${Math.round(parseFloat(tags.ele))} m`;
     else props.name_ele = tags.name || '';
@@ -269,7 +282,7 @@ export async function fetchOSM(query, bbox, signal) {
 
 const DOC_BASE = 'https://services1.arcgis.com/3JjYDyG3oajxU6HO/arcgis/rest/services';
 
-function docProps(p) {
+export function docProps(p) {
   const out = { name: p.TechObjectName || p.name || '', type: p.SubObjectType || p.ObjectType || '' };
   for (let i = 1; i <= 20; i++) {
     const k = p[`CharName${i}`];

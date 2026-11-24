@@ -1,6 +1,7 @@
 import { getKey, setCustomKey, isCustomKey, loadCatalog, loadTopoStyle, FIXED_BASES, findBase, intersects, coverage, BASEMAPS } from './linz.js';
 import { PRESETS, LICENCES, GRADES, fetchOSM, fetchDOC, parseFile, bboxOf } from './sources.js';
 import { buildStyle, attachIcons, FONTS, DASHES, ROAD_CLASSES, PLACE_CATS, roadLook } from './style.js';
+import { checkData } from './data.js';
 import { printGeometry, boundsOf, niceScale, renderPrint, encode, worldFile, download, paperSize } from './export.js';
 
 const $ = s => document.querySelector(s);
@@ -64,6 +65,7 @@ function save() {
 }
 
 let key = getKey();
+let dataMeta = null;   // pre-built NZ trail tiles, if available
 let catalog = null;
 let topo = null;
 
@@ -341,11 +343,12 @@ function addLayer(presetId, extra = {}) {
   const L = {
     id: uid(), preset: presetId, name: p.name, source: p.source, kind: p.kind, visible: true,
     style: { ...clone(p.style), labelFont: state.labelFont }, data: null, status: 'empty', expanded: false,
-    query: p.custom ? p.query : undefined, attribution: '', ...extra,
+    query: p.custom ? p.query : undefined, attribution: '',
+    mode: dataMeta && p.tiles ? 'tiles' : 'live', ...extra,
   };
   if (L.kind === 'roads') { L.style.labelFont = 'Open Sans Regular'; state.layers.push(L); } else state.layers.unshift(L);
   renderLayers(); syncMap(); refreshCredits();
-  if (L.source === 'osm' || L.source === 'doc') loadLayer(L);
+  if (isLive(L)) loadLayer(L);
   else if (L.source === 'linz' && L.kind !== 'roads') toast('LINZ tracks show from zoom ~12 — zoom in if you don’t see them.');
   return L;
 }
@@ -382,7 +385,7 @@ async function loadLayer(L) {
   renderLayers(); syncMap();
 }
 
-$('#btn-reload-all').addEventListener('click', () => state.layers.filter(l => l.source === 'osm' || l.source === 'doc').forEach(loadLayer));
+$('#btn-reload-all').addEventListener('click', () => state.layers.filter(isLive).forEach(loadLayer));
 
 $('#file-input').addEventListener('change', async e => {
   for (const file of e.target.files) {
@@ -421,7 +424,11 @@ function swatch(L) {
   return `<svg class="layer__sw" viewBox="0 0 26 14" style="background:#8a8f7a">${s.casing ? `<line x1="0" y1="7" x2="26" y2="7" stroke="${s.casingColor}" stroke-width="${w + 3}"/>` : ''}${lines}${stripe}</svg>`;
 }
 
+const isLive = L => (L.source === 'osm' || L.source === 'doc') && L.mode !== 'tiles';
+const builtDate = () => dataMeta ? new Date(dataMeta.built).toLocaleDateString('en-NZ', { day: 'numeric', month: 'short', year: 'numeric' }) : '';
+
 function statusText(L) {
+  if (L.mode === 'tiles') return `<span>NZ-wide, instant · data ${builtDate()}</span>`;
   if (L.status === 'loading') return '<span><i class="spin"></i> Loading…</span>';
   if (L.status === 'error') return `<span class="err">${esc(L.error)}</span>`;
   if (L.source === 'linz') return '<span>LINZ · whole country, instant</span>';
@@ -467,10 +474,13 @@ function layerBody(L) {
   if (L.source === 'file') {
     h += `<label class="stack">Credit for this data <input type="text" data-k="attribution" value="${esc(L.attribution)}" placeholder="e.g. GPS data © Your Name"></label>`;
   }
+  if (p.tiles && dataMeta && !p.custom) {
+    h += `<label class="row">Data <select data-k="mode"><option value="tiles" ${L.mode === 'tiles' ? 'selected' : ''}>Pre-built NZ (instant, weekly)</option><option value="live" ${L.mode !== 'tiles' ? 'selected' : ''}>Live (latest edits, this area)</option></select></label>`;
+  }
   const lic = LICENCES[L.source];
   h += `<p class="layer__src">${esc(lic.name)} · ${esc(lic.licence)}${L.loadedBbox ? ' · loaded for previous view' : ''}</p><div class="split" style="margin-top:8px">`;
-  if (L.source === 'osm' || L.source === 'doc') h += `<button type="button" class="btn small" data-act="reload">Reload for this area</button>`;
-  if (L.data) h += `<button type="button" class="btn ghost small" data-act="geojson" title="${L.source === 'osm' ? 'OSM data is ODbL: if you share or sell this file it must stay ODbL and credit OpenStreetMap contributors' : 'Keep the source credit with the data'}">Download GeoJSON</button>`;
+  if (isLive(L)) h += `<button type="button" class="btn small" data-act="reload">Reload for this area</button>`;
+  if (L.data && L.mode !== 'tiles') h += `<button type="button" class="btn ghost small" data-act="geojson" title="${L.source === 'osm' ? 'OSM data is ODbL: if you share or sell this file it must stay ODbL and credit OpenStreetMap contributors' : 'Keep the source credit with the data'}">Download GeoJSON</button>`;
   h += '</div>';
   return h;
 }
@@ -524,6 +534,7 @@ $('#layer-list').addEventListener('input', e => {
     L[el.dataset.k] = el.value;
     if (el.dataset.k === 'name') el.closest('.layer').querySelector('.layer__name b').textContent = el.value;
     if (el.dataset.k === 'attribution') refreshCredits();
+    if (el.dataset.k === 'mode') { if (isLive(L) && !L.data) loadLayer(L); renderLayers(); syncMap(); return; }
     save(); return;
   }
   if (el.dataset.c) { L.style.classes[el.dataset.c] = el.checked; el.closest('.layer').querySelector('.layer__sw').outerHTML = swatch(L); syncMap(); return; }
@@ -890,6 +901,14 @@ document.addEventListener('keydown', e => {
 });
 
 // ---- Init -------------------------------------------------------------------------------------------------
+
+checkData().then(meta => {
+  dataMeta = meta;
+  $('#data-status').innerHTML = meta
+    ? `⚡ Pre-built NZ trail data from <b>${builtDate()}</b>: OSM and DOC layers show instantly everywhere. Switch a layer to <i>Live</i> in its settings for edits made since.`
+    : 'Pre-built NZ trail data isn’t available yet, so layers load live for the area you’re viewing.';
+  renderLayers(); renderPresetGrid();
+});
 
 $('#p-credits').value = state.print.credits;
 renderPlaceEditor();

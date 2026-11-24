@@ -12,6 +12,7 @@
   <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css">
   <link rel="stylesheet" href="css/app.css">
   <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+  <script src="https://unpkg.com/pmtiles@3.2.1/dist/pmtiles.js"></script>
 </head>
 <body>
   <aside id="panel">
@@ -103,6 +104,7 @@
       </div>
       <div class="group">
         <h2>Loading trails</h2>
+        <p class="small data-status" id="data-status">Checking for pre-built trail data…</p>
         <p class="muted small">OSM and DOC layers load for the area you’re looking at (or the print frame, if bigger). Move the map, then hit <b>Reload</b> on a layer — or:</p>
         <button class="btn small" id="btn-reload-all" type="button">Reload all for this area</button>
       </div>

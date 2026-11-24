@@ -211,3 +211,4 @@ textarea { resize: vertical; font-size: 12px; }
 .search__credit { display: block; font-size: 10px; color: var(--muted); margin-top: 3px; text-align: right; }
 .lic ul { margin: 4px 0 0 18px; padding: 0; color: var(--muted); font-size: 12px; }
 .lic li { margin: 2px 0; }
+.data-status { background: var(--accent-soft); border-radius: 8px; padding: 8px 10px; line-height: 1.45; }

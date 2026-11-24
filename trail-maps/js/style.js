@@ -1,6 +1,7 @@
 // Builds a MapLibre style from app state. Used for both the live map and the print renderer.
 import { GLYPHS, tileUrl, demUrl, topoVectorUrl, baseSource } from './linz.js';
 import { GRADES, PRESETS } from './sources.js';
+import { TILES_URL } from './data.js';
 
 const EMPTY = { type: 'FeatureCollection', features: [] };
 
@@ -75,7 +76,9 @@ function lineLayers(L, srcProps) {
 function pointLayers(L, srcProps) {
   const s = L.style;
   const id = `u-${L.id}`;
-  const base = { source: srcProps.source, filter: ['match', ['geometry-type'], ['Point', 'MultiPoint'], true, false] };
+  const geom = ['match', ['geometry-type'], ['Point', 'MultiPoint'], true, false];
+  const base = { source: srcProps.source, ...(srcProps['source-layer'] ? { 'source-layer': srcProps['source-layer'] } : {}),
+    filter: srcProps.filter ? ['all', srcProps.filter, geom] : geom };
   const out = [];
   if (s.icon === 'circle' || !s.icon) {
     out.push({
@@ -239,7 +242,12 @@ export function buildStyle(state, { key, topo = null, tileScale = 0 } = {}) {
       layers.push(...r.lines); pointLs.push(...r.labels);
       continue;
     }
-    if (L.source === 'linz') {
+    if (L.mode === 'tiles' && PRESETS[L.preset]?.tiles) {
+      // Pre-built NZ-wide tiles: instant, no loading.
+      const t = PRESETS[L.preset].tiles;
+      sources.nzt ||= { type: 'vector', url: TILES_URL };
+      src = { source: 'nzt', 'source-layer': t.layer, filter: t.filter };
+    } else if (L.source === 'linz') {
       if (!sources.linz) continue;
       src = { source: 'linz', 'source-layer': 'transportation', filter: PRESETS[L.preset]?.filter };
     } else {

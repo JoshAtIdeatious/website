@@ -1,0 +1,80 @@
+name: Build NZ trail data
+
+# Pre-builds NZ-wide trail tiles for Trail Map Studio (trail-maps/) so trails load
+# instantly instead of querying Overpass. Output is force-pushed to the `trail-data`
+# branch (one commit, so the repo doesn't grow) and served from raw.githubusercontent.com.
+on:
+  schedule:
+    - cron: '17 14 * * 0'   # Sundays 14:17 UTC = Monday early morning NZ
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: trail-data
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install osmium and tippecanoe
+        run: sudo apt-get update -q && sudo apt-get install -y -q osmium-tool tippecanoe
+
+      - name: Download NZ OpenStreetMap extract (Geofabrik)
+        run: curl -L --fail --retry 3 -o nz.osm.pbf https://download.geofabrik.de/australia-oceania/new-zealand-latest.osm.pbf
+
+      - name: Filter to trails, routes and outdoor points
+        run: |
+          osmium tags-filter nz.osm.pbf \
+            w/highway=path,footway,bridleway,cycleway,steps,track \
+            r/route=mtb,bicycle,hiking,foot,walking \
+            nwr/tourism=alpine_hut,wilderness_hut nwr/amenity=shelter \
+            n/natural=peak,volcano n/place=village,hamlet,locality,isolated_dwelling \
+            -o filtered.osm.pbf
+
+      - name: Classify features and fetch DOC data
+        run: node trail-maps/tools/build-data.mjs filtered.osm.pbf out
+
+      - name: Build PMTiles
+        run: |
+          build() {
+            tippecanoe -q --force -o out/nz-trails.pmtiles -Z"$1" -z"$2" -r1 \
+              --drop-densest-as-needed --extend-zooms-if-still-dropping \
+              -L trails:out/trails.geojsonl -L pois:out/pois.geojsonl \
+              -L doc_tracks:out/doc_tracks.geojsonl -L doc_huts:out/doc_huts.geojsonl
+          }
+          build 8 14
+          # GitHub rejects files over 100 MB: trim detail until it fits.
+          for z in "9 14" "10 13" "10 12"; do
+            size=$(stat -c %s out/nz-trails.pmtiles)
+            echo "size: $((size / 1000000)) MB"
+            [ "$size" -lt 95000000 ] && break
+            build $z
+          done
+          ls -la out
+
+      - name: Publish to trail-data branch
+        run: |
+          mkdir publish
+          cp out/nz-trails.pmtiles out/meta.json publish/
+          cat > publish/README.md <<'EOF'
+          Pre-built NZ trail data for Trail Map Studio, rebuilt weekly by .github/workflows/trail-data.yml.
+          Contains OpenStreetMap data © OpenStreetMap contributors (ODbL 1.0, https://www.openstreetmap.org/copyright)
+          and Department of Conservation data (CC BY 4.0). This database is made available under the ODbL.
+          EOF
+          cd publish
+          git init -q -b trail-data
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -q -m "NZ trail data $(date -u +%Y-%m-%d)"
+          git push -q --force "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" trail-data
