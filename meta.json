@@ -1,0 +1,13 @@
+{
+  "built": "2026-11-25T23:13:19.861Z",
+  "counts": {
+    "trails": 201440,
+    "pois": 17460,
+    "doc_tracks": 3246,
+    "doc_huts": 963
+  },
+  "sources": [
+    "OpenStreetMap NZ data, © OpenStreetMap contributors, ODbL 1.0",
+    "Department of Conservation, CC BY 4.0"
+  ]
+}
